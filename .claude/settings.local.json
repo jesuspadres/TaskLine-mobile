@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tree:*)",
+      "Bash(ls:*)",
+      "Bash(head:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx expo install:*)",
+      "Bash(npm install:*)",
+      "Bash(npx expo start --tunnel)",
+      "Bash(timeout:*)",
+      "Bash(ping:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(npx expo start:*)",
+      "Bash(node:*)",
+      "Bash(dir \"c:\\\\Users\\\\jezzi\\\\OneDrive\\\\Documents\\\\taskline-mobile\\\\taskline-mobile\\\\assets\" /B)",
+      "Bash(find:*)",
+      "Bash(npx expo export:*)",
+      "Bash(npx react-native bundle:*)",
+      "Bash(npx kill-port:*)",
+      "Bash(dir:*)",
+      "WebFetch(domain:nextnative.dev)",
+      "Bash(cmd /c \"taskkill /PID 237320 /F\")",
+      "Bash(cmd //c \"taskkill /PID 237320 /F\")",
+      "Bash(grep:*)",
+      "Bash(identify:*)",
+      "Bash(copy:*)",
+      "Bash(python3:*)",
+      "Bash(git add:*)",
+      "Bash(git rm:*)",
+      "Bash(git reset:*)"
+    ]
+  }
+}
