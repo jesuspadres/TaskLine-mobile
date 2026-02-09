@@ -23,7 +23,7 @@ export function CriticalAlertsCard() {
   const user = useAuthStore((s) => s.user);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
 
   useEffect(() => {
     if (user) loadAlerts();

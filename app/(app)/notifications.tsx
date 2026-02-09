@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,13 +12,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/hooks/useTheme';
 import { useNotifications } from '@/hooks/useNotifications';
-import { FilterChips, EmptyState } from '@/components';
+import { useTranslations } from '@/hooks/useTranslations';
+import { FilterChips, EmptyState, showToast } from '@/components';
 import { Spacing, FontSizes, BorderRadius, Shadows } from '@/constants/theme';
-
-const FILTERS = [
-  { key: 'all', label: 'All' },
-  { key: 'unread', label: 'Unread' },
-];
 
 function getNotificationIcon(type: string): keyof typeof Ionicons.glyphMap {
   const map: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -36,7 +32,7 @@ function getNotificationIcon(type: string): keyof typeof Ionicons.glyphMap {
   return map[type] || 'notifications';
 }
 
-function getRelativeTime(dateStr: string): string {
+function getRelativeTime(dateStr: string, t: (key: string, opts?: any) => string): string {
   const now = new Date();
   const date = new Date(dateStr);
   const diffMs = now.getTime() - date.getTime();
@@ -44,16 +40,30 @@ function getRelativeTime(dateStr: string): string {
   const diffHours = Math.floor(diffMs / 3600000);
   const diffDays = Math.floor(diffMs / 86400000);
 
-  if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
+  if (diffMins < 1) return t('notifications.justNow');
+  if (diffMins < 60) return t('notifications.minutesAgo', { count: diffMins });
+  if (diffHours < 24) return t('notifications.hoursAgo', { count: diffHours });
+  if (diffDays < 7) return t('notifications.daysAgo', { count: diffDays });
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function getMobileRoute(entityType: string | null, entityId: string | null): string | null {
+  if (!entityType || !entityId) return null;
+  const routes: Record<string, string> = {
+    request: `/(app)/request-detail?id=${entityId}`,
+    booking: `/(app)/booking-detail?id=${entityId}`,
+    project: `/(app)/project-detail?id=${entityId}`,
+    client: `/(app)/client-detail?id=${entityId}`,
+    invoice: '/(app)/invoices',
+    task: '/(app)/tasks',
+  };
+  return routes[entityType] ?? null;
 }
 
 export default function NotificationsScreen() {
   const { colors } = useTheme();
   const router = useRouter();
+  const { t } = useTranslations();
   const {
     notifications,
     unreadCount,
@@ -65,6 +75,11 @@ export default function NotificationsScreen() {
   } = useNotifications();
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [refreshing, setRefreshing] = useState(false);
+
+  const FILTERS = useMemo(() => [
+    { key: 'all', label: t('notifications.all') },
+    { key: 'unread', label: t('notifications.unread') },
+  ], [t]);
 
   const filtered = filter === 'unread'
     ? notifications.filter((n) => !n.is_read)
@@ -85,9 +100,11 @@ export default function NotificationsScreen() {
     if (!notification.is_read) {
       await markAsRead(notification.id);
     }
-    // Navigate to the linked entity if available
-    if (notification.link_url) {
-      router.push(notification.link_url as any);
+    const route = getMobileRoute(notification.entity_type, notification.entity_id);
+    if (route) {
+      router.push(route as any);
+    } else {
+      showToast('info', t('notifications.noRoute'));
     }
   };
 
@@ -97,10 +114,10 @@ export default function NotificationsScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={[styles.title, { color: colors.text }]}>Notifications</Text>
+        <Text style={[styles.title, { color: colors.text }]}>{t('notifications.title')}</Text>
         {unreadCount > 0 && (
           <TouchableOpacity onPress={markAllAsRead} style={styles.markAllButton}>
-            <Text style={[styles.markAllText, { color: colors.primary }]}>Mark all read</Text>
+            <Text style={[styles.markAllText, { color: colors.primary }]}>{t('notifications.markAllRead')}</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -127,8 +144,8 @@ export default function NotificationsScreen() {
         ListEmptyComponent={
           <EmptyState
             icon="notifications-off-outline"
-            title="No notifications"
-            description={filter === 'unread' ? "You're all caught up!" : 'Notifications will appear here'}
+            title={filter === 'unread' ? t('notifications.noUnread') : t('notifications.noNotifications')}
+            description={filter === 'unread' ? t('notifications.noUnreadDesc') : t('notifications.noNotificationsDesc')}
           />
         }
         renderItem={({ item }) => {
@@ -173,7 +190,7 @@ export default function NotificationsScreen() {
                   </Text>
                 )}
                 <Text style={[styles.notificationTime, { color: colors.textTertiary }]}>
-                  {getRelativeTime(item.created_at)}
+                  {getRelativeTime(item.created_at, t)}
                 </Text>
               </View>
               <TouchableOpacity

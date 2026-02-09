@@ -8,6 +8,7 @@ import {
   RefreshControl,
   Alert,
   Share,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -27,7 +28,7 @@ import { ENV } from '@/lib/env';
 import type { Project, Task, Invoice, Client, ProjectLineItem } from '@/lib/database.types';
 
 type ProjectStatus = 'active' | 'completed' | 'on_hold' | 'cancelled';
-type TaskStatus = 'todo' | 'in_progress' | 'completed';
+type TaskStatus = 'backlog' | 'pending' | 'in_progress' | 'completed';
 type TaskPriority = 'low' | 'medium' | 'high';
 
 export default function ProjectDetailScreen() {
@@ -44,6 +45,14 @@ export default function ProjectDetailScreen() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [lineItems, setLineItems] = useState<ProjectLineItem[]>([]);
+  const [properties, setProperties] = useState<Array<{
+    id: string;
+    name: string;
+    address_formatted: string | null;
+    address_street: string | null;
+    address_city: string | null;
+    address_state: string | null;
+  }>>([]);
 
   // i18n-safe select options
   const PROJECT_STATUS_OPTIONS: SelectOption[] = useMemo(() => [
@@ -54,7 +63,7 @@ export default function ProjectDetailScreen() {
   ], [t]);
 
   const TASK_STATUS_OPTIONS: SelectOption[] = useMemo(() => [
-    { key: 'todo', label: t('tasks.todo') },
+    { key: 'pending', label: t('tasks.todo') },
     { key: 'in_progress', label: t('tasks.inProgress') },
     { key: 'completed', label: t('tasks.completed') },
   ], [t]);
@@ -95,6 +104,19 @@ export default function ProjectDetailScreen() {
     due_date: null as Date | null,
   });
   const [taskFormErrors, setTaskFormErrors] = useState<Record<string, string>>({});
+
+  // Location picker modal state
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
+  const [allProperties, setAllProperties] = useState<Array<{
+    id: string;
+    name: string;
+    address_formatted: string | null;
+    address_street: string | null;
+    address_city: string | null;
+    address_state: string | null;
+    client_id: string | null;
+  }>>([]);
+  const [linkingProperty, setLinkingProperty] = useState(false);
 
   // Add line item modal state
   const [showAddItemModal, setShowAddItemModal] = useState(false);
@@ -141,7 +163,7 @@ export default function ProjectDetailScreen() {
     switch (status) {
       case 'completed': return 'checkmark-circle';
       case 'in_progress': return 'time';
-      case 'todo': default: return 'ellipse-outline';
+      case 'pending': default: return 'ellipse-outline';
     }
   };
 
@@ -149,7 +171,7 @@ export default function ProjectDetailScreen() {
     switch (status) {
       case 'completed': return colors.success;
       case 'in_progress': return colors.info;
-      case 'todo': default: return colors.textTertiary;
+      case 'pending': default: return colors.textTertiary;
     }
   }, [colors]);
 
@@ -237,16 +259,75 @@ export default function ProjectDetailScreen() {
     }
   }, [id]);
 
+  const fetchProperties = useCallback(async (clientId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('properties')
+        .select('id, name, address_formatted, address_street, address_city, address_state')
+        .eq('client_id', clientId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setProperties((data as any) || []);
+    } catch (error: any) {
+      secureLog.error('Error fetching properties:', error);
+    }
+  }, []);
+
+  const fetchAllProperties = useCallback(async () => {
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('properties')
+        .select('id, name, address_formatted, address_street, address_city, address_state, client_id')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setAllProperties((data as any) || []);
+    } catch (error: any) {
+      secureLog.error('Error fetching all properties:', error);
+    }
+  }, [user]);
+
+  const handleLinkProperty = async (propertyId: string) => {
+    if (!project?.client_id) return;
+    setLinkingProperty(true);
+    try {
+      const { error } = await supabase
+        .from('properties')
+        .update({ client_id: project.client_id } as any)
+        .eq('id', propertyId);
+
+      if (error) throw error;
+      showToast('success', t('projectDetail.propertyLinked'));
+      setShowLocationPicker(false);
+      // Re-fetch client properties to update the list
+      fetchProperties(project.client_id);
+    } catch (error: any) {
+      secureLog.error('Error linking property:', error);
+      showToast('error', t('projectDetail.updateError'));
+    } finally {
+      setLinkingProperty(false);
+    }
+  };
+
+  const openLocationPicker = async () => {
+    await fetchAllProperties();
+    setShowLocationPicker(true);
+  };
+
   const fetchAll = useCallback(async () => {
     const projectData = await fetchProject();
     const promises: Promise<void>[] = [fetchTasks(), fetchInvoices(), fetchLineItems()];
     if (projectData?.client_id) {
       promises.push(fetchClient(projectData.client_id));
+      promises.push(fetchProperties(projectData.client_id));
     }
     await Promise.all(promises);
     setLoading(false);
     setRefreshing(false);
-  }, [fetchProject, fetchClient, fetchTasks, fetchInvoices, fetchLineItems]);
+  }, [fetchProject, fetchClient, fetchTasks, fetchInvoices, fetchLineItems, fetchProperties]);
 
   useEffect(() => {
     fetchAll();
@@ -455,7 +536,7 @@ export default function ProjectDetailScreen() {
     try {
       const { error } = await supabase
         .from('tasks')
-        .update({ status: newStatus })
+        .update({ status: newStatus } as any)
         .eq('id', task.id);
 
       if (error) throw error;
@@ -468,10 +549,10 @@ export default function ProjectDetailScreen() {
 
   const getNextTaskStatus = (current: TaskStatus): TaskStatus => {
     switch (current) {
-      case 'todo': return 'in_progress';
+      case 'pending': return 'in_progress';
       case 'in_progress': return 'completed';
-      case 'completed': return 'todo';
-      default: return 'todo';
+      case 'completed': return 'pending';
+      default: return 'pending';
     }
   };
 
@@ -503,7 +584,7 @@ export default function ProjectDetailScreen() {
         description: taskForm.description.trim() || null,
         priority: taskForm.priority,
         due_date: taskForm.due_date?.toISOString().split('T')[0] || null,
-        status: 'todo' as TaskStatus,
+        status: 'pending' as TaskStatus,
       } as any);
 
       if (error) throw error;
@@ -815,6 +896,67 @@ export default function ProjectDetailScreen() {
           </View>
         </View>
 
+        {/* Project Location */}
+        <View style={[styles.propertiesCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View style={styles.propertiesHeader}>
+            <Ionicons name="location-outline" size={18} color={colors.text} />
+            <Text style={[styles.propertiesTitle, { color: colors.text }]}>{t('projectDetail.projectLocation')}</Text>
+            <TouchableOpacity
+              style={[styles.addLocationBtn, { backgroundColor: colors.primary }]}
+              onPress={openLocationPicker}
+            >
+              <Ionicons name="add" size={16} color="#fff" />
+              <Text style={styles.addLocationBtnText}>{t('projectDetail.addLocation')}</Text>
+            </TouchableOpacity>
+          </View>
+          {properties.length > 0 ? (
+            properties.map((property, idx) => {
+              const address = property.address_formatted || [property.address_street, property.address_city, property.address_state].filter(Boolean).join(', ') || null;
+
+              return (
+                <TouchableOpacity
+                  key={property.id}
+                  style={[
+                    styles.propertyItem,
+                    idx < properties.length - 1 && { borderBottomColor: colors.borderLight, borderBottomWidth: 1 },
+                  ]}
+                  onPress={() => router.push({ pathname: '/(app)/property-detail', params: { id: property.id } } as any)}
+                >
+                  <View style={[styles.propertyIcon, { backgroundColor: colors.infoLight }]}>
+                    <Ionicons name="home-outline" size={18} color={colors.primary} />
+                  </View>
+                  <View style={styles.propertyInfo}>
+                    <Text style={[styles.propertyItemName, { color: colors.text }]} numberOfLines={1}>
+                      {property.name}
+                    </Text>
+                    {address && (
+                      <Text style={[styles.propertyItemAddress, { color: colors.textSecondary }]} numberOfLines={1}>
+                        {address}
+                      </Text>
+                    )}
+                  </View>
+                  <View style={styles.propertyActions}>
+                    {address && (
+                      <TouchableOpacity
+                        style={[styles.propertyMapsBtn, { backgroundColor: colors.surfaceSecondary }]}
+                        onPress={() => Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`)}
+                      >
+                        <Ionicons name="navigate-outline" size={14} color={colors.primary} />
+                      </TouchableOpacity>
+                    )}
+                    <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+                  </View>
+                </TouchableOpacity>
+              );
+            })
+          ) : (
+            <View style={styles.locationEmptyState}>
+              <Ionicons name="location-outline" size={32} color={colors.textTertiary} />
+              <Text style={[styles.locationEmptyText, { color: colors.textTertiary }]}>{t('projectDetail.noLocation')}</Text>
+            </View>
+          )}
+        </View>
+
         {/* Approval Workflow */}
         {client && project.approval_status !== 'approved' && (
           <View style={[styles.workflowCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -942,15 +1084,19 @@ export default function ProjectDetailScreen() {
               >
                 <TouchableOpacity
                   style={styles.taskStatusButton}
-                  onPress={() => handleTaskStatusChange(task, getNextTaskStatus(task.status))}
+                  onPress={() => handleTaskStatusChange(task, getNextTaskStatus(task.status as string as TaskStatus))}
                 >
                   <Ionicons
-                    name={getTaskStatusIcon(task.status)}
+                    name={getTaskStatusIcon(task.status as string as TaskStatus)}
                     size={22}
-                    color={getTaskStatusColor(task.status)}
+                    color={getTaskStatusColor(task.status as string as TaskStatus)}
                   />
                 </TouchableOpacity>
-                <View style={styles.taskContent}>
+                <TouchableOpacity
+                  style={styles.taskContent}
+                  onPress={() => router.push('/(app)/tasks' as any)}
+                  activeOpacity={0.7}
+                >
                   <Text
                     style={[
                       styles.taskTitle,
@@ -977,7 +1123,7 @@ export default function ProjectDetailScreen() {
                       </>
                     )}
                   </View>
-                </View>
+                </TouchableOpacity>
                 <View style={styles.taskActions}>
                   {task.status !== 'completed' && (
                     <TouchableOpacity
@@ -990,7 +1136,7 @@ export default function ProjectDetailScreen() {
                   {task.status === 'completed' && (
                     <TouchableOpacity
                       style={[styles.taskQuickAction, { backgroundColor: colors.surfaceSecondary }]}
-                      onPress={() => handleTaskStatusChange(task, 'todo')}
+                      onPress={() => handleTaskStatusChange(task, 'pending')}
                     >
                       <Ionicons name="refresh" size={16} color={colors.textSecondary} />
                     </TouchableOpacity>
@@ -1230,6 +1376,70 @@ export default function ProjectDetailScreen() {
         </View>
       </Modal>
 
+      {/* Location Picker Modal */}
+      <Modal
+        visible={showLocationPicker}
+        onClose={() => setShowLocationPicker(false)}
+        title={t('projectDetail.selectProperty')}
+        size="full"
+      >
+        <ScrollView style={styles.locationPickerList}>
+          {allProperties.filter(p => !properties.some(cp => cp.id === p.id)).length > 0 ? (
+            allProperties
+              .filter(p => !properties.some(cp => cp.id === p.id))
+              .map((property) => {
+                const address = property.address_formatted || [property.address_street, property.address_city, property.address_state].filter(Boolean).join(', ') || null;
+                return (
+                  <TouchableOpacity
+                    key={property.id}
+                    style={[styles.locationPickerItem, { borderBottomColor: colors.borderLight }]}
+                    onPress={() => handleLinkProperty(property.id)}
+                    disabled={linkingProperty}
+                  >
+                    <View style={[styles.propertyIcon, { backgroundColor: colors.infoLight }]}>
+                      <Ionicons name="home-outline" size={18} color={colors.primary} />
+                    </View>
+                    <View style={styles.propertyInfo}>
+                      <Text style={[styles.propertyItemName, { color: colors.text }]} numberOfLines={1}>
+                        {property.name}
+                      </Text>
+                      {address && (
+                        <Text style={[styles.propertyItemAddress, { color: colors.textSecondary }]} numberOfLines={1}>
+                          {address}
+                        </Text>
+                      )}
+                    </View>
+                    <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
+                  </TouchableOpacity>
+                );
+              })
+          ) : (
+            <View style={styles.locationEmptyState}>
+              <Ionicons name="home-outline" size={32} color={colors.textTertiary} />
+              <Text style={[styles.locationEmptyText, { color: colors.textTertiary }]}>
+                {t('projectDetail.noPropertiesAvailable')}
+              </Text>
+            </View>
+          )}
+        </ScrollView>
+        <View style={[styles.modalActions, { borderTopColor: colors.border }]}>
+          <Button
+            title={t('common.cancel')}
+            onPress={() => setShowLocationPicker(false)}
+            variant="secondary"
+            style={styles.actionButton}
+          />
+          <Button
+            title={t('projectDetail.createNewProperty')}
+            onPress={() => {
+              setShowLocationPicker(false);
+              router.push({ pathname: '/(app)/properties', params: { create: 'true', client_id: project?.client_id || '' } } as any);
+            }}
+            style={styles.actionButton}
+          />
+        </View>
+      </Modal>
+
       {/* Add/Edit Line Item Modal */}
       <Modal
         visible={showAddItemModal}
@@ -1417,6 +1627,93 @@ const styles = StyleSheet.create({
   detailValue: {
     fontSize: FontSizes.sm,
     fontWeight: '600',
+  },
+
+  // Properties Card
+  propertiesCard: {
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+    marginBottom: Spacing.lg,
+    borderWidth: 1,
+  },
+  propertiesHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  addLocationBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.md,
+    gap: 2,
+    marginLeft: 'auto',
+  },
+  addLocationBtnText: {
+    fontSize: FontSizes.xs,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  locationEmptyState: {
+    alignItems: 'center',
+    paddingVertical: Spacing.xl,
+    gap: Spacing.sm,
+  },
+  locationEmptyText: {
+    fontSize: FontSizes.sm,
+    textAlign: 'center',
+  },
+  locationPickerList: {
+    maxHeight: 300,
+  },
+  locationPickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    gap: Spacing.md,
+    borderBottomWidth: 1,
+  },
+  propertiesTitle: {
+    fontSize: FontSizes.md,
+    fontWeight: '600',
+  },
+  propertyItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    gap: Spacing.md,
+  },
+  propertyIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: BorderRadius.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  propertyInfo: {
+    flex: 1,
+  },
+  propertyItemName: {
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  propertyItemAddress: {
+    fontSize: FontSizes.xs,
+  },
+  propertyActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  propertyMapsBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: BorderRadius.md,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 
   // Workflow Card

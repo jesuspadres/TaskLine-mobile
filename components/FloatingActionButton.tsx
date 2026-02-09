@@ -137,26 +137,6 @@ export function FloatingActionButton() {
           router.push({ pathname: '/(app)/invoices', params: { create: 'true' } } as any);
         },
       },
-      {
-        id: 'request',
-        icon: 'mail-outline',
-        label: t('fab.newRequest'),
-        color: colors.primary,
-        onPress: () => {
-          close();
-          router.push({ pathname: '/(app)/jobs', params: { create: 'true' } } as any);
-        },
-      },
-      {
-        id: 'booking',
-        icon: 'calendar-outline',
-        label: t('fab.newBooking'),
-        color: colors.success,
-        onPress: () => {
-          close();
-          router.push({ pathname: '/(app)/bookings', params: { create: 'true' } } as any);
-        },
-      },
     ],
     [colors, t, close, router]
   );
@@ -173,7 +153,7 @@ export function FloatingActionButton() {
 
   const sheetTranslateY = animatedValue.interpolate({
     inputRange: [0, 1],
-    outputRange: [400, 0],
+    outputRange: [300, 0],
   });
 
   return (
@@ -299,8 +279,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: BorderRadius['2xl'],
     borderTopRightRadius: BorderRadius['2xl'],
     paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing['4xl'],
-    maxHeight: '80%',
+    paddingBottom: Spacing.xl,
+    maxHeight: '60%',
   },
   sheetHandle: {
     width: 40,
@@ -313,7 +293,7 @@ const styles = StyleSheet.create({
   sheetTitle: {
     fontSize: FontSizes.xl,
     fontWeight: '700',
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.md,
   },
   actionItem: {
     flexDirection: 'row',

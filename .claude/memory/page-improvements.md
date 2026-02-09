@@ -79,7 +79,51 @@ Mobile source: `c:\Users\jezzi\OneDrive\Documents\taskline-mobile\taskline-mobil
 - [x] Added ~17 new i18n keys to en.json and es.json
 
 ## Jobs (Requests + Bookings) — `app/(app)/(tabs)/jobs.tsx`
-- [ ] Not started — need to compare with website
+**Status: [x] DONE**
+
+### Improvements Made — Requests Segment
+- [x] All hardcoded English strings replaced with `t()` i18n calls
+- [x] Module-level arrays moved inside component with `useMemo` (i18n-safe)
+- [x] `console.error` → `secureLog.error()`, `Alert.alert` → `showToast` + `ConfirmDialog`
+- [x] `ActivityIndicator` → `ListSkeleton` for loading state
+- [x] SearchBar for filtering by title, description, client name, location, budget
+- [x] Sort modal (Oldest, Newest, Name A-Z, Name Z-A)
+- [x] Request summary stat cards (New, Reviewing, Accepted, Declined) — clickable to filter
+- [x] FilterChips component (default: New)
+- [x] Default filter: **New**, default sort: **Oldest first** (matches website)
+- [x] Quick actions on cards: Review, Create Proposal, Accept, Decline (matches website)
+- [x] Accepted requests show "Convert to Project" action
+- [x] Description shown on cards (`project_description` or `description`)
+- [x] Location shown on cards (`address_formatted`) — tappable, opens Google Maps
+- [x] Budget + timeline/deadline shown on cards
+- [x] Client name + avatar on cards (from join or `name` field)
+- [x] Removed Create Request button/modal (requests come from clients via portal)
+- [x] Removed Edit Request modal (edit via request-detail page)
+- [x] Share link + QR code buttons in header (replaces + button)
+- [x] Empty state shows "Share Portal" CTA instead of "Add"
+- [x] Locale-aware date formatting, haptic feedback, count badge
+
+### Improvements Made — Bookings Segment
+- [x] All hardcoded English strings replaced with `t()` i18n calls
+- [x] Module-level arrays moved inside component with `useMemo` (i18n-safe)
+- [x] `console.error` → `secureLog.error()`, `Alert.alert` → `showToast`
+- [x] `ActivityIndicator` → `ListSkeleton` for loading state
+- [x] SearchBar for filtering by title, description, client name, location, notes
+- [x] Sort modal (Oldest, Newest, Soonest, Latest)
+- [x] Booking summary stat cards (Pending, Confirmed, Completed, Cancelled) — clickable to filter
+- [x] FilterChips component (default: Pending)
+- [x] Default filter: **Pending**, default sort: **Oldest first** (matches website)
+- [x] Quick Confirm button on pending cards, Quick Complete on past confirmed
+- [x] Past confirmed bookings highlighted with warning border
+- [x] Description shown on cards
+- [x] Location shown on cards (`address_formatted`) — tappable, opens Google Maps
+- [x] Client name + avatar on cards (from join or `client_name` field)
+- [x] Removed Create Booking button/modal (bookings come from clients via portal)
+- [x] Removed Edit Booking modal and View modal (streamlined to tap → detail)
+- [x] Share link + QR code buttons in header (replaces + button)
+- [x] Empty state shows "Share Portal" CTA instead of "Add"
+- [x] Locale-aware date/time formatting, haptic feedback, count badge
+- [x] Added ~100 i18n keys to en.json and es.json (`requests` + `bookings` namespaces)
 
 ## Clients — `app/(app)/(tabs)/clients.tsx`
 **Status: [x] DONE**
@@ -98,7 +142,29 @@ Mobile source: `c:\Users\jezzi\OneDrive\Documents\taskline-mobile\taskline-mobil
 - [x] Added ~22 new i18n keys to en.json and es.json
 
 ## Calendar — `app/(app)/(tabs)/calendar.tsx`
-- [ ] Not started — need to compare with website
+**Status: [x] DONE**
+
+### Improvements Made
+- [x] All hardcoded English strings replaced with `t()` i18n calls
+- [x] `DAYS_OF_WEEK` moved inside component with `useMemo` (i18n-safe)
+- [x] `console.error` → `secureLog.error()`, `Alert.alert` → `showToast()`
+- [x] `ActivityIndicator` → `ListSkeleton` for loading state
+- [x] Locale-aware date/time formatting (en-US / es-MX)
+- [x] NEW: Project deadlines as third event type (fetches from `projects` table with client join)
+- [x] NEW: Month/List view toggle (grid icon + list icon)
+- [x] NEW: List view shows upcoming events grouped by date, with FlatList + EmptyState
+- [x] NEW: Events are tappable — navigates to task list, booking-detail, or project-detail
+- [x] NEW: Client name and project name shown on event cards
+- [x] NEW: Booking time range shown (start – end)
+- [x] NEW: Event type legend below calendar grid (Task / Booking / Deadline with colored dots)
+- [x] NEW: 3 dot colors on calendar days (blue=task, green=booking, gold=deadline)
+- [x] NEW: Past dates shown at 50% opacity
+- [x] NEW: Overdue tasks/deadlines highlighted with red border
+- [x] NEW: Status labels i18n'd (Pending, In Progress, Completed, Confirmed, etc.)
+- [x] Status color maps moved inside `useMemo`
+- [x] Haptic feedback on navigation, date selection, view toggle
+- [x] Fetches all events (not just current month) for list view
+- [x] Added ~35 i18n keys to en.json and es.json (`calendar` namespace)
 
 ## More Menu — `app/(app)/(tabs)/more.tsx`
 - [ ] Not started — need to compare with website
@@ -188,10 +254,43 @@ Mobile source: `c:\Users\jezzi\OneDrive\Documents\taskline-mobile\taskline-mobil
 - [x] Added ~50 new i18n keys to en.json and es.json (`invoices` namespace)
 
 ## Properties — `app/(app)/properties.tsx`
-- [ ] Not started — need to compare with website
+**Status: [x] DONE**
+
+### Improvements Made
+- [x] All hardcoded English strings replaced with `t()` i18n calls
+- [x] Filter chips by property type: All, Residential, Commercial, Other (scrollable, `useMemo`)
+- [x] Sort functionality added: Newest, Oldest, Name A-Z, Name Z-A (sort modal)
+- [x] Property count badge in header (solid primary bg, white text for contrast)
+- [x] Stats cards: Total, Homes, Commercial, Other — descriptive labels, tappable to filter
+- [x] Industrial category merged into Other
+- [x] `console.error` replaced with `secureLog.error()`
+- [x] `Alert.alert` replaced with `showToast` for success/error feedback
+- [x] `ActivityIndicator` replaced with `ListSkeleton` for loading state
+- [x] Card tap navigates to `property-detail` (instead of opening edit modal)
+- [x] Removed edit modal from list page (edit only in property-detail)
+- [x] Added `property_type` field to add form (Select dropdown)
+- [x] Property type icon on cards (home/business/construct/location based on type)
+- [x] Property type badge displayed on cards when available
+- [x] Haptic feedback on add, card tap, filter selection, sort
+- [x] `keyboardDismissMode="on-drag"` on FlatList
+- [x] Empty state differentiates "no properties" vs "no search results"
+- [x] Client select options wrapped in `useMemo`
+- [x] Added ~45 i18n keys to en.json and es.json (`properties` namespace)
 
 ## Notifications — `app/(app)/notifications.tsx`
-- [ ] Not started — need to compare with website
+**Status: [~] Partially improved**
+
+### Improvements Made
+- [x] All hardcoded English strings replaced with `t()` i18n calls
+- [x] Filter chip labels moved inside component with `useMemo` (i18n-safe)
+- [x] Relative time formatting uses i18n keys
+- [x] Fixed navigation: uses `entity_type`/`entity_id` → mobile route mapping instead of broken `link_url`
+- [x] Route mapping: request→request-detail, booking→booking-detail, project→project-detail, client→client-detail, invoice→invoices, task→tasks
+- [x] Fallback toast when no route available
+- [x] Empty state differentiates "all" vs "unread" filters
+
+### Still TODO
+- [ ] Compare full feature set with website notifications page
 
 ## Plans — `app/(app)/plans.tsx`
 - [ ] Not started — need to compare with website
@@ -228,24 +327,40 @@ Mobile source: `c:\Users\jezzi\OneDrive\Documents\taskline-mobile\taskline-mobil
 - [x] Header with edit (pencil) and delete (trash) action buttons
 
 ## Property Detail — `app/(app)/property-detail.tsx`
-**Status: [x] DONE**
+**Status: [x] DONE (v3)**
 
-### Improvements Made
-- [x] New dedicated property detail page (read-only view)
+### Round 1 — Initial Implementation
+- [x] Dedicated property detail page (read-only view)
 - [x] Property name, primary badge, client link, date added
-- [x] Full address display
-- [x] Square footage and year built stat cards
-- [x] Access codes section: gate code, lockbox code, alarm code (not masked)
-- [x] Pets, hazards, notes sections
-- [x] Edit button → full edit modal with all fields (incl. address line 2, sq ft, year built)
-- [x] Delete button with confirmation dialog
-- [x] Navigate to client detail from property page
-- [x] Registered in `_layout.tsx`
-- [x] Client detail property cards now navigate to property detail (instead of opening edit modal)
-- [x] All strings use `t()` i18n calls
-- [x] Added `propertyDetail` namespace (~14 i18n keys) to en.json and es.json
-- [x] Dark mode support via `useTheme()`
-- [x] Pull-to-refresh, keyboard dismiss on drag
+- [x] Full address display, sq ft / year built stat cards
+- [x] Access codes, pets, hazards, notes sections
+- [x] Edit modal, delete with confirmation, registered in `_layout.tsx`
+
+### Round 2 — Full Overhaul
+- [x] Property type icon in name card (home/business/construct/location)
+- [x] Property type badge displayed alongside primary badge
+- [x] Pets badge shown in name card badges row
+- [x] "Navigate" button on address card — opens Google Maps
+- [x] Linked Projects section — shows client's projects with status badges, budget, tap to detail
+- [x] Safety Information card — combined pets + hazards with colored icons
+- [x] Property type Select dropdown in edit form
+- [x] Client Select dropdown in edit form (can reassign property)
+- [x] Address fields split into line1/line2/city/state/zip in edit form
+- [x] Haptic feedback on edit, delete, navigate, project tap
+- [x] All i18n keys moved to `propertyDetail.*` namespace (no more borrowing from `clientDetail.*`)
+- [x] Added ~20 new i18n keys (navigate, accessCodes, editProperty, deleteProperty, linkedProjects, etc.)
+- [x] `console.error` → `secureLog.error()`, `Alert.alert` kept only for destructive delete
+- [x] Address display reads `address_formatted` first (website/Google Places), falls back to component fields
+- [x] Map preview with `react-native-maps` MapView when lat/lng available (non-interactive, tap to open Maps)
+- [x] Address fix also applied to properties list page card addresses
+
+### Round 3 — Schema Fix + Category Cleanup
+- [x] Update/insert payloads use website column names (`address_street`, `address_city`, `pet_details`, `property_notes`, etc.)
+- [x] Read logic prefers website columns with fallback to old names
+- [x] Industrial category removed — merged into Other
+- [x] Pets display reads `pet_details` || `pets`, notes reads `property_notes` || `notes`
+- [x] Coordinates read `address_lat`/`address_lng` with fallback to `latitude`/`longitude`
+- [x] Stats cards: Total, Homes, Commercial, Other (more descriptive labels)
 
 ## Project Detail — `app/(app)/project-detail.tsx`
 **Status: [x] DONE**
@@ -275,4 +390,63 @@ Mobile source: `c:\Users\jezzi\OneDrive\Documents\taskline-mobile\taskline-mobil
 - [x] Start date and estimated duration shown in details grid when available
 
 ## Request Detail — `app/(app)/request-detail.tsx`
-- [ ] Not started — need to compare with website
+**Status: [x] DONE**
+
+### Improvements Made
+- [x] Full rewrite with all website fields
+- [x] Extended type interface: `address_formatted`, `project_description`, `budget_range`, `timeline`, `name`, `email`, `phone`
+- [x] Status badge with `useMemo` color map
+- [x] Client info card: avatar, name, email (tappable mailto), phone (tappable tel), "View Client" button
+- [x] Details card: budget, deadline/timeline, received date
+- [x] Location card: address + "Navigate" button (opens Google Maps)
+- [x] Project description card
+- [x] Action buttons: Review, Create Proposal, Accept, Decline (for active requests)
+- [x] Action buttons: Create Proposal, Archive (for accepted requests)
+- [x] Status updates via ConfirmDialog
+- [x] Messages card with count badge → taps to dedicated `request-messages.tsx` chat screen
+- [x] Message input with send button (in `request-messages.tsx`)
+- [x] Metadata footer with request ID
+- [x] All strings i18n'd with `requestDetail.*` namespace (~50 keys)
+- [x] `console.error` → `secureLog.error()`, `Alert.alert` → `showToast` + `ConfirmDialog`
+- [x] `ActivityIndicator` → `ListSkeleton`
+- [x] Locale-aware date formatting
+
+## Booking Detail — `app/(app)/booking-detail.tsx`
+**Status: [x] DONE**
+
+### Improvements Made
+- [x] New page created from scratch (no previous booking detail page existed)
+- [x] Registered in `_layout.tsx`, booking cards in jobs.tsx navigate here
+- [x] Extended type interface: `client_name`, `client_email`, `client_phone`, `address_formatted`, `address_lat`, `address_lng`, `booking_date`, `invoice_id`
+- [x] Status badge with `useMemo` color map (pending, confirmed, completed, cancelled, no_show)
+- [x] Past due warning banner for confirmed bookings past their end time
+- [x] Client info card: avatar, name, email (tappable mailto), phone (tappable tel), "View Client" button
+- [x] Appointment details card: service date, start time, end time, received date
+- [x] Location card: address + "Navigate" button (opens Google Maps)
+- [x] Description card, Notes card
+- [x] Action buttons for pending: Confirm, Cancel
+- [x] Action buttons for confirmed: Mark Complete (with 2-option modal: Complete & Invoice vs Just Complete), Cancel
+- [x] Action button for completed (no invoice): Create Invoice
+- [x] Status updates via ConfirmDialog
+- [x] All strings i18n'd with `bookingDetail.*` namespace (~40 keys)
+- [x] `secureLog.error()` for error logging, `showToast()` for user feedback
+- [x] `ListSkeleton` for loading state
+- [x] Locale-aware date/time formatting
+- [x] TypeScript clean (passes `npx tsc --noEmit`)
+
+## Request Messages — `app/(app)/request-messages.tsx`
+**Status: [x] DONE**
+
+### Improvements Made
+- [x] New dedicated chat screen (extracted from request-detail.tsx)
+- [x] FlatList-based message rendering (better perf than ScrollView.map)
+- [x] Real-time Supabase subscription for new messages
+- [x] Chat bubbles: freelancer=right/primary, client=left/gray
+- [x] Message input bar with send button + disabled state
+- [x] Auto-scroll to bottom on load and new messages
+- [x] KeyboardAvoidingView wrapping input
+- [x] Header with back button, client name, message count
+- [x] Empty state with icon
+- [x] i18n'd relative timestamps (just now, Xm ago, Xh ago, Xd ago)
+- [x] Sends via website API with Bearer token auth
+- [x] Registered in `_layout.tsx`

@@ -437,7 +437,7 @@ export default function DashboardScreen() {
 
             <TouchableOpacity
               style={[styles.statsGridItem, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => router.push('/(app)/requests' as any)}
+              onPress={() => router.push('/(app)/(tabs)/jobs' as any)}
             >
               <Ionicons name="mail" size={16} color={colors.statusNew} />
               <Text style={[styles.statsStripValue, { color: colors.text }]}>{newRequests.length}</Text>
@@ -484,7 +484,7 @@ export default function DashboardScreen() {
                     styles.listItem,
                     (idx < todayBookings.length - 1 || todayTasks.length > 0) && { borderBottomColor: colors.borderLight, borderBottomWidth: 1 },
                   ]}
-                  onPress={() => router.push('/(app)/bookings' as any)}
+                  onPress={() => router.push({ pathname: '/(app)/booking-detail', params: { id: booking.id } } as any)}
                 >
                   <View style={[styles.listItemIcon, { backgroundColor: colors.successLight }]}>
                     <Ionicons name="calendar" size={18} color={colors.success} />
@@ -551,7 +551,7 @@ export default function DashboardScreen() {
                   idx < comingUpItems.length - 1 && { borderBottomColor: colors.borderLight, borderBottomWidth: 1 },
                 ]}
                 onPress={() => {
-                  if (item.type === 'booking') router.push('/(app)/bookings' as any);
+                  if (item.type === 'booking') router.push({ pathname: '/(app)/booking-detail', params: { id: item.id } } as any);
                   else if (item.type === 'deadline') router.push({ pathname: '/(app)/project-detail', params: { id: item.id } } as any);
                 }}
               >
@@ -647,7 +647,7 @@ export default function DashboardScreen() {
                   <Text style={[styles.countChipText, { color: colors.statusNew }]}>{newRequests.length}</Text>
                 </View>
               </View>
-              <TouchableOpacity onPress={() => router.push('/(app)/requests' as any)}>
+              <TouchableOpacity onPress={() => router.push('/(app)/(tabs)/jobs' as any)}>
                 <Text style={[styles.seeAllText, { color: colors.primary }]}>{t('common.seeAll')}</Text>
               </TouchableOpacity>
             </View>

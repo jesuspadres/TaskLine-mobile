@@ -26,6 +26,8 @@ export default function AppLayout() {
       <Stack.Screen name="client-detail" />
       <Stack.Screen name="project-detail" />
       <Stack.Screen name="request-detail" />
+      <Stack.Screen name="request-messages" />
+      <Stack.Screen name="booking-detail" />
       <Stack.Screen name="property-detail" />
       <Stack.Screen name="business-profile" />
       <Stack.Screen name="invoice-settings" />
