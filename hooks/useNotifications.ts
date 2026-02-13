@@ -80,6 +80,17 @@ export function useNotifications() {
     } catch {}
   }, []);
 
+  const archiveAllRead = useCallback(async () => {
+    try {
+      await supabase
+        .from('notifications')
+        .update({ is_archived: true } as any)
+        .eq('is_archived', false)
+        .eq('is_read', true);
+      setNotifications((prev) => prev.filter((n) => !n.is_read));
+    } catch {}
+  }, []);
+
   const archiveAll = useCallback(async () => {
     try {
       await supabase
@@ -129,6 +140,7 @@ export function useNotifications() {
     markAsRead,
     markAllAsRead,
     archiveNotification,
+    archiveAllRead,
     archiveAll,
   };
 }

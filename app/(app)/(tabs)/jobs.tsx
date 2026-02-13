@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   RefreshControl,
   Share,
   Linking,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,8 +17,11 @@ import { supabase } from '@/lib/supabase';
 import { secureLog } from '@/lib/security';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
+import { useCollapsibleFilters } from '@/hooks/useCollapsibleFilters';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
+import { useOfflineData } from '@/hooks/useOfflineData';
+import { useOfflineMutation } from '@/hooks/useOfflineMutation';
 import { ENV } from '@/lib/env';
 import {
   Modal, EmptyState, FilterChips, SearchBar, ListSkeleton,
@@ -88,23 +92,41 @@ export default function JobsScreen() {
   const router = useRouter();
   const haptics = useHaptics();
   const dateLocale = locale === 'es' ? 'es-MX' : 'en-US';
+  const { filterContainerStyle, onFilterLayout, onScroll, filterHeight } = useCollapsibleFilters();
 
   // --- Segment ---
   const [segment, setSegment] = useState<Segment>('requests');
 
   // --- Requests state ---
-  const [requestsLoading, setRequestsLoading] = useState(true);
-  const [requestsRefreshing, setRequestsRefreshing] = useState(false);
-  const [requests, setRequests] = useState<RequestWithClient[]>([]);
+  const { data: requests, loading: requestsLoading, refreshing: requestsRefreshing, refresh: refreshRequests } = useOfflineData<RequestWithClient[]>(
+    'requests',
+    async () => {
+      const { data, error } = await supabase
+        .from('requests')
+        .select('*, client:clients(id, name, email)')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []) as any;
+    },
+  );
   const [requestFilterStatus, setRequestFilterStatus] = useState<string>('new');
   const [requestSearch, setRequestSearch] = useState('');
   const [requestSort, setRequestSort] = useState('oldest');
   const [showRequestSortModal, setShowRequestSortModal] = useState(false);
 
   // --- Bookings state ---
-  const [bookingsLoading, setBookingsLoading] = useState(true);
-  const [bookingsRefreshing, setBookingsRefreshing] = useState(false);
-  const [bookings, setBookings] = useState<BookingWithClient[]>([]);
+  const { data: bookings, loading: bookingsLoading, refreshing: bookingsRefreshing, refresh: refreshBookings } = useOfflineData<BookingWithClient[]>(
+    'bookings',
+    async () => {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('*, client:clients(id, name, email)')
+        .order('start_time', { ascending: false });
+      if (error) throw error;
+      return (data || []) as any;
+    },
+  );
+  const { mutate } = useOfflineMutation();
   const [bookingFilterStatus, setBookingFilterStatus] = useState<string>('pending');
   const [bookingSearch, setBookingSearch] = useState('');
   const [bookingSort, setBookingSort] = useState('oldest');
@@ -170,7 +192,7 @@ export default function JobsScreen() {
   // Computed: filtered/sorted/searched data
   // ================================================================
   const filteredRequests = useMemo(() => {
-    let result = requests;
+    let result = (requests ?? []);
     if (requestFilterStatus !== 'all') {
       result = result.filter(r => r.status === requestFilterStatus);
     }
@@ -199,7 +221,7 @@ export default function JobsScreen() {
   }, [requests, requestFilterStatus, requestSearch, requestSort]);
 
   const filteredBookings = useMemo(() => {
-    let result = bookings;
+    let result = (bookings ?? []);
     if (bookingFilterStatus !== 'all') {
       result = result.filter(b => b.status === bookingFilterStatus);
     }
@@ -227,18 +249,18 @@ export default function JobsScreen() {
 
   // Request stats
   const requestStats = useMemo(() => ({
-    new: requests.filter(r => r.status === 'new').length,
-    reviewing: requests.filter(r => r.status === 'reviewing').length,
-    accepted: requests.filter(r => r.status === 'accepted' || r.status === 'converted').length,
-    declined: requests.filter(r => r.status === 'declined').length,
+    new: (requests ?? []).filter(r => r.status === 'new').length,
+    reviewing: (requests ?? []).filter(r => r.status === 'reviewing').length,
+    accepted: (requests ?? []).filter(r => r.status === 'accepted' || r.status === 'converted').length,
+    declined: (requests ?? []).filter(r => r.status === 'declined').length,
   }), [requests]);
 
   // Booking stats
   const bookingStats = useMemo(() => ({
-    pending: bookings.filter(b => b.status === 'pending').length,
-    confirmed: bookings.filter(b => b.status === 'confirmed').length,
-    completed: bookings.filter(b => b.status === 'completed').length,
-    cancelled: bookings.filter(b => b.status === 'cancelled').length,
+    pending: (bookings ?? []).filter(b => b.status === 'pending').length,
+    confirmed: (bookings ?? []).filter(b => b.status === 'confirmed').length,
+    completed: (bookings ?? []).filter(b => b.status === 'completed').length,
+    cancelled: (bookings ?? []).filter(b => b.status === 'cancelled').length,
   }), [bookings]);
 
   // ================================================================
@@ -275,44 +297,8 @@ export default function JobsScreen() {
   }, [t]);
 
   // ================================================================
-  // FETCH
+  // FETCH (handled by useOfflineData hooks above)
   // ================================================================
-  const fetchRequests = useCallback(async () => {
-    try {
-      const { data, error } = await supabase
-        .from('requests')
-        .select('*, client:clients(id, name, email)')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      setRequests((data || []) as any);
-    } catch (error) {
-      secureLog.error('Error fetching requests:', error);
-      showToast('error', t('requests.loadError'));
-    } finally {
-      setRequestsLoading(false);
-      setRequestsRefreshing(false);
-    }
-  }, [t]);
-
-  const fetchBookings = useCallback(async () => {
-    try {
-      const { data, error } = await supabase
-        .from('bookings')
-        .select('*, client:clients(id, name, email)')
-        .order('start_time', { ascending: false });
-      if (error) throw error;
-      setBookings((data || []) as any);
-    } catch (error) {
-      secureLog.error('Error fetching bookings:', error);
-      showToast('error', t('bookings.loadError'));
-    } finally {
-      setBookingsLoading(false);
-      setBookingsRefreshing(false);
-    }
-  }, [t]);
-
-  useEffect(() => { fetchRequests(); }, [fetchRequests]);
-  useEffect(() => { fetchBookings(); }, [fetchBookings]);
 
   // ================================================================
   // NAVIGATION
@@ -330,13 +316,10 @@ export default function JobsScreen() {
   // ================================================================
   const handleQuickStatusUpdate = async (requestId: string, newStatus: string) => {
     try {
-      const { error } = await supabase
-        .from('requests')
-        .update({ status: newStatus } as any)
-        .eq('id', requestId);
+      const { error } = await mutate({ table: 'requests', operation: 'update', data: { status: newStatus }, matchValue: requestId, cacheKeys: ['requests'] });
       if (error) throw error;
       haptics.impact();
-      fetchRequests();
+      refreshRequests();
       showToast('success', t('requests.requestUpdated'));
     } catch (error) {
       secureLog.error('Error updating request status:', error);
@@ -369,7 +352,7 @@ export default function JobsScreen() {
       if (updateError) throw updateError;
 
       haptics.notification(Haptics.NotificationFeedbackType.Success);
-      fetchRequests();
+      refreshRequests();
       showToast('success', t('requests.convertSuccess'));
     } catch (error) {
       secureLog.error('Error converting request:', error);
@@ -403,13 +386,10 @@ export default function JobsScreen() {
   // ================================================================
   const handleQuickConfirm = async (booking: BookingWithClient) => {
     try {
-      const { error } = await supabase
-        .from('bookings')
-        .update({ status: 'confirmed' })
-        .eq('id', booking.id);
+      const { error } = await mutate({ table: 'bookings', operation: 'update', data: { status: 'confirmed' }, matchValue: booking.id, cacheKeys: ['bookings'] });
       if (error) throw error;
       haptics.impact();
-      fetchBookings();
+      refreshBookings();
       showToast('success', t('bookings.quickConfirmed'));
     } catch (error: any) {
       secureLog.error('Error confirming booking:', error);
@@ -419,13 +399,10 @@ export default function JobsScreen() {
 
   const handleQuickComplete = async (booking: BookingWithClient) => {
     try {
-      const { error } = await supabase
-        .from('bookings')
-        .update({ status: 'completed' })
-        .eq('id', booking.id);
+      const { error } = await mutate({ table: 'bookings', operation: 'update', data: { status: 'completed' }, matchValue: booking.id, cacheKeys: ['bookings'] });
       if (error) throw error;
       haptics.impact();
-      fetchBookings();
+      refreshBookings();
       showToast('success', t('bookings.quickCompleted'));
     } catch (error: any) {
       secureLog.error('Error completing booking:', error);
@@ -437,14 +414,12 @@ export default function JobsScreen() {
   // REFRESH
   // ================================================================
   const onRequestsRefresh = useCallback(() => {
-    setRequestsRefreshing(true);
-    fetchRequests();
-  }, [fetchRequests]);
+    refreshRequests();
+  }, [refreshRequests]);
 
   const onBookingsRefresh = useCallback(() => {
-    setBookingsRefreshing(true);
-    fetchBookings();
-  }, [fetchBookings]);
+    refreshBookings();
+  }, [refreshBookings]);
 
   // ================================================================
   // Open location in maps
@@ -460,7 +435,7 @@ export default function JobsScreen() {
   // ================================================================
   // RENDER: Request card
   // ================================================================
-  const renderRequest = ({ item }: { item: RequestWithClient }) => {
+  const renderRequest = useCallback(({ item }: { item: RequestWithClient }) => {
     const status = item.status;
     const itemColors = requestStatusColors[status] || requestStatusColors.new;
     const clientName = item.client?.name || item.name || t('requests.unknown');
@@ -611,12 +586,12 @@ export default function JobsScreen() {
         )}
       </TouchableOpacity>
     );
-  };
+  }, [colors, t, requestStatusColors, navigateToRequestDetail, formatRequestDate, getStatusLabel, handleQuickStatusUpdate, handleConvertToProject, openInMaps, dateLocale]);
 
   // ================================================================
   // RENDER: Booking card
   // ================================================================
-  const renderBooking = ({ item }: { item: BookingWithClient }) => {
+  const renderBooking = useCallback(({ item }: { item: BookingWithClient }) => {
     const itemColors = bookingStatusColors[item.status] || bookingStatusColors.pending;
     const clientName = item.client?.name || item.client_name || t('bookings.noClient');
     const isPast = item.status === 'confirmed' && new Date(item.end_time || item.start_time) < new Date();
@@ -724,7 +699,7 @@ export default function JobsScreen() {
         )}
       </TouchableOpacity>
     );
-  };
+  }, [colors, t, bookingStatusColors, router, formatRequestDate, formatTimeRange, getStatusLabel, handleQuickConfirm, handleQuickComplete, openInMaps, dateLocale]);
 
   // ================================================================
   // RENDER: Share / QR header actions
@@ -858,61 +833,68 @@ export default function JobsScreen() {
             ))}
           </View>
 
-          {/* Search + Sort */}
-          <View style={styles.searchRow}>
-            <SearchBar
-              value={requestSearch}
-              onChangeText={setRequestSearch}
-              placeholder={t('requests.searchPlaceholder')}
-              style={styles.searchBarFlex}
-            />
-            <TouchableOpacity
-              style={[styles.sortButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => setShowRequestSortModal(true)}
-            >
-              <Ionicons name="swap-vertical" size={20} color={colors.textSecondary} />
-              {requestSort !== 'oldest' && (
-                <View style={[styles.sortBadge, { backgroundColor: colors.primary }]}>
-                  <Text style={styles.sortBadgeText}>1</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          </View>
+          {/* Search + Sort + Filter Chips + Request List */}
+          <View style={{ flex: 1, overflow: 'hidden' }}>
+            <Animated.View style={[filterContainerStyle, { backgroundColor: colors.background }]} onLayout={onFilterLayout}>
+              <View style={styles.searchRow}>
+                <SearchBar
+                  value={requestSearch}
+                  onChangeText={setRequestSearch}
+                  placeholder={t('requests.searchPlaceholder')}
+                  style={styles.searchBarFlex}
+                />
+                <TouchableOpacity
+                  style={[styles.sortButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  onPress={() => setShowRequestSortModal(true)}
+                >
+                  <Ionicons name="swap-vertical" size={20} color={colors.textSecondary} />
+                  {requestSort !== 'oldest' && (
+                    <View style={[styles.sortBadge, { backgroundColor: colors.primary }]}>
+                      <Text style={styles.sortBadgeText}>1</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              </View>
+              <View style={styles.filterContainer}>
+                <FilterChips
+                  options={requestFilterOptions}
+                  selected={requestFilterStatus}
+                  onSelect={(value) => setRequestFilterStatus(value)}
+                  scrollable
+                />
+              </View>
+            </Animated.View>
 
-          {/* Filter Chips */}
-          <View style={styles.filterContainer}>
-            <FilterChips
-              options={requestFilterOptions}
-              selected={requestFilterStatus}
-              onSelect={(value) => setRequestFilterStatus(value)}
-              scrollable
+            <Animated.FlatList
+              data={filteredRequests}
+              renderItem={renderRequest}
+              keyExtractor={(item) => item.id}
+              keyboardDismissMode="on-drag"
+              contentContainerStyle={[styles.listContent, { paddingTop: filterHeight }]}
+              onScroll={onScroll}
+              scrollEventThrottle={16}
+              removeClippedSubviews
+              maxToRenderPerBatch={10}
+              windowSize={5}
+              initialNumToRender={10}
+              refreshControl={
+                <RefreshControl refreshing={requestsRefreshing} onRefresh={onRequestsRefresh} />
+              }
+              ListEmptyComponent={
+                <EmptyState
+                  icon="mail-outline"
+                  title={requestSearch || requestFilterStatus !== 'all'
+                    ? t('requests.noResults')
+                    : t('requests.noRequests')}
+                  description={requestSearch || requestFilterStatus !== 'all'
+                    ? t('requests.tryDifferentSearch')
+                    : t('requests.noRequestsShareDesc')}
+                  actionLabel={!requestSearch && requestFilterStatus === 'all' ? t('requests.sharePortal') : undefined}
+                  onAction={!requestSearch && requestFilterStatus === 'all' ? handleShareLink : undefined}
+                />
+              }
             />
           </View>
-
-          {/* Request List */}
-          <FlatList
-            data={filteredRequests}
-            renderItem={renderRequest}
-            keyExtractor={(item) => item.id}
-            keyboardDismissMode="on-drag"
-            contentContainerStyle={styles.listContent}
-            refreshControl={
-              <RefreshControl refreshing={requestsRefreshing} onRefresh={onRequestsRefresh} />
-            }
-            ListEmptyComponent={
-              <EmptyState
-                icon="mail-outline"
-                title={requestSearch || requestFilterStatus !== 'all'
-                  ? t('requests.noResults')
-                  : t('requests.noRequests')}
-                description={requestSearch || requestFilterStatus !== 'all'
-                  ? t('requests.tryDifferentSearch')
-                  : t('requests.noRequestsShareDesc')}
-                actionLabel={!requestSearch && requestFilterStatus === 'all' ? t('requests.sharePortal') : undefined}
-                onAction={!requestSearch && requestFilterStatus === 'all' ? handleShareLink : undefined}
-              />
-            }
-          />
         </>
       )}
 
@@ -950,61 +932,68 @@ export default function JobsScreen() {
             ))}
           </View>
 
-          {/* Search + Sort */}
-          <View style={styles.searchRow}>
-            <SearchBar
-              value={bookingSearch}
-              onChangeText={setBookingSearch}
-              placeholder={t('bookings.searchPlaceholder')}
-              style={styles.searchBarFlex}
-            />
-            <TouchableOpacity
-              style={[styles.sortButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => setShowBookingSortModal(true)}
-            >
-              <Ionicons name="swap-vertical" size={20} color={colors.textSecondary} />
-              {bookingSort !== 'oldest' && (
-                <View style={[styles.sortBadge, { backgroundColor: colors.primary }]}>
-                  <Text style={styles.sortBadgeText}>1</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          </View>
+          {/* Search + Sort + Filter Chips + Booking List */}
+          <View style={{ flex: 1, overflow: 'hidden' }}>
+            <Animated.View style={[filterContainerStyle, { backgroundColor: colors.background }]} onLayout={onFilterLayout}>
+              <View style={styles.searchRow}>
+                <SearchBar
+                  value={bookingSearch}
+                  onChangeText={setBookingSearch}
+                  placeholder={t('bookings.searchPlaceholder')}
+                  style={styles.searchBarFlex}
+                />
+                <TouchableOpacity
+                  style={[styles.sortButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  onPress={() => setShowBookingSortModal(true)}
+                >
+                  <Ionicons name="swap-vertical" size={20} color={colors.textSecondary} />
+                  {bookingSort !== 'oldest' && (
+                    <View style={[styles.sortBadge, { backgroundColor: colors.primary }]}>
+                      <Text style={styles.sortBadgeText}>1</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              </View>
+              <View style={styles.filterContainer}>
+                <FilterChips
+                  options={bookingFilterOptions}
+                  selected={bookingFilterStatus}
+                  onSelect={(value) => setBookingFilterStatus(value)}
+                  scrollable
+                />
+              </View>
+            </Animated.View>
 
-          {/* Filter Chips */}
-          <View style={styles.filterContainer}>
-            <FilterChips
-              options={bookingFilterOptions}
-              selected={bookingFilterStatus}
-              onSelect={(value) => setBookingFilterStatus(value)}
-              scrollable
-            />
-          </View>
-
-          {/* Booking List */}
-          <FlatList
-            data={filteredBookings}
-            renderItem={renderBooking}
-            keyExtractor={(item) => item.id}
-            keyboardDismissMode="on-drag"
-            contentContainerStyle={styles.listContent}
-            refreshControl={
-              <RefreshControl refreshing={bookingsRefreshing} onRefresh={onBookingsRefresh} />
-            }
-            ListEmptyComponent={
-              <EmptyState
-                icon="calendar-outline"
-                title={bookingSearch || bookingFilterStatus !== 'all'
-                  ? t('bookings.noResults')
-                  : t('bookings.noBookings')}
-                description={bookingSearch || bookingFilterStatus !== 'all'
-                  ? t('bookings.tryDifferentSearch')
-                  : t('requests.noBookingsShareDesc')}
-                actionLabel={!bookingSearch && bookingFilterStatus === 'all' ? t('requests.sharePortal') : undefined}
-                onAction={!bookingSearch && bookingFilterStatus === 'all' ? handleShareBookingLink : undefined}
+            <Animated.FlatList
+              data={filteredBookings}
+              renderItem={renderBooking}
+              keyExtractor={(item) => item.id}
+              keyboardDismissMode="on-drag"
+              contentContainerStyle={[styles.listContent, { paddingTop: filterHeight }]}
+              onScroll={onScroll}
+              scrollEventThrottle={16}
+              removeClippedSubviews
+              maxToRenderPerBatch={10}
+              windowSize={5}
+              initialNumToRender={10}
+              refreshControl={
+                <RefreshControl refreshing={bookingsRefreshing} onRefresh={onBookingsRefresh} />
+              }
+              ListEmptyComponent={
+                <EmptyState
+                  icon="calendar-outline"
+                  title={bookingSearch || bookingFilterStatus !== 'all'
+                    ? t('bookings.noResults')
+                    : t('bookings.noBookings')}
+                  description={bookingSearch || bookingFilterStatus !== 'all'
+                    ? t('bookings.tryDifferentSearch')
+                    : t('requests.noBookingsShareDesc')}
+                  actionLabel={!bookingSearch && bookingFilterStatus === 'all' ? t('requests.sharePortal') : undefined}
+                  onAction={!bookingSearch && bookingFilterStatus === 'all' ? handleShareBookingLink : undefined}
               />
             }
           />
+          </View>
         </>
       )}
 

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,8 @@ import {
 import { useAuthStore } from '@/stores/authStore';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
+import { useOfflineData } from '@/hooks/useOfflineData';
+import { useOfflineMutation } from '@/hooks/useOfflineMutation';
 import type { Client } from '@/lib/database.types';
 
 interface Property {
@@ -81,15 +83,71 @@ export default function ClientDetailScreen() {
   const { colors } = useTheme();
   const { t, locale } = useTranslations();
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [client, setClient] = useState<Client | null>(null);
-  const [properties, setProperties] = useState<Property[]>([]);
-  const [projects, setProjects] = useState<ClientProject[]>([]);
-  const [invoices, setInvoices] = useState<ClientInvoice[]>([]);
-  const [requests, setRequests] = useState<ClientRequest[]>([]);
-  const [bookings, setBookings] = useState<ClientBooking[]>([]);
-  const [invoicesTotal, setInvoicesTotal] = useState(0);
+  // ─── Offline Data ──────────────────────────────────────────
+
+  interface ClientDetailData {
+    client: Client | null;
+    properties: Property[];
+    projects: ClientProject[];
+    invoices: ClientInvoice[];
+    requests: ClientRequest[];
+    bookings: ClientBooking[];
+    invoicesTotal: number;
+  }
+
+  const { data: clientData, loading, refreshing, refresh } = useOfflineData<ClientDetailData>(
+    `client_detail:${id}`,
+    async () => {
+      const [clientRes, propsRes, projRes, invRes, reqRes, bookRes] = await Promise.all([
+        supabase.from('clients').select('*').eq('id', id!).single(),
+        supabase.from('properties').select('*').eq('client_id', id!)
+          .order('is_primary', { ascending: false }).order('name', { ascending: true }),
+        supabase.from('projects').select('id, name, status, deadline')
+          .eq('client_id', id!).order('created_at', { ascending: false }).limit(5),
+        supabase.from('invoices').select('id, invoice_number, status, total, due_date')
+          .eq('client_id', id!).order('created_at', { ascending: false }).limit(5),
+        supabase.from('client_requests').select('id, name, status, created_at')
+          .eq('client_id', id!).order('created_at', { ascending: false }).limit(5),
+        supabase.from('bookings').select('id, title, status, start_time')
+          .eq('client_id', id!).order('start_time', { ascending: false }).limit(5),
+      ]);
+
+      if (clientRes.error) throw clientRes.error;
+
+      const invData = (invRes.data as ClientInvoice[]) ?? [];
+
+      return {
+        client: clientRes.data as Client,
+        properties: (propsRes.data as Property[]) ?? [],
+        projects: (projRes.data as ClientProject[]) ?? [],
+        invoices: invData,
+        requests: (reqRes.data as ClientRequest[]) ?? [],
+        bookings: (bookRes.data as ClientBooking[]) ?? [],
+        invoicesTotal: invData.reduce((sum, inv) => sum + (inv.total || 0), 0),
+      };
+    },
+    { enabled: !!id },
+  );
+
+  const { mutate } = useOfflineMutation();
+
+  const {
+    client,
+    properties,
+    projects,
+    invoices,
+    requests,
+    bookings,
+    invoicesTotal,
+  } = clientData ?? {
+    client: null,
+    properties: [],
+    projects: [],
+    invoices: [],
+    requests: [],
+    bookings: [],
+    invoicesTotal: 0,
+  };
 
   // Edit client modal
   const [showEditModal, setShowEditModal] = useState(false);
@@ -112,52 +170,6 @@ export default function ClientDetailScreen() {
   const [propertyFormErrors, setPropertyFormErrors] = useState<Record<string, string>>({});
 
   const dateLocale = locale === 'es' ? 'es-ES' : 'en-US';
-
-  // ─── Data Fetching ───────────────────────────────────────────
-
-  const fetchAll = useCallback(async () => {
-    if (!id) return;
-
-    try {
-      const [clientRes, propsRes, projRes, invRes, reqRes, bookRes] = await Promise.all([
-        supabase.from('clients').select('*').eq('id', id).single(),
-        supabase.from('properties').select('*').eq('client_id', id)
-          .order('is_primary', { ascending: false }).order('name', { ascending: true }),
-        supabase.from('projects').select('id, name, status, deadline')
-          .eq('client_id', id).order('created_at', { ascending: false }).limit(5),
-        supabase.from('invoices').select('id, invoice_number, status, total, due_date')
-          .eq('client_id', id).order('created_at', { ascending: false }).limit(5),
-        supabase.from('client_requests').select('id, name, status, created_at')
-          .eq('client_id', id).order('created_at', { ascending: false }).limit(5),
-        supabase.from('bookings').select('id, title, status, start_time')
-          .eq('client_id', id).order('start_time', { ascending: false }).limit(5),
-      ]);
-
-      if (clientRes.error) throw clientRes.error;
-      setClient(clientRes.data as Client);
-      setProperties((propsRes.data as Property[]) ?? []);
-      setProjects((projRes.data as ClientProject[]) ?? []);
-
-      const invData = (invRes.data as ClientInvoice[]) ?? [];
-      setInvoices(invData);
-      setInvoicesTotal(invData.reduce((sum, inv) => sum + (inv.total || 0), 0));
-
-      setRequests((reqRes.data as ClientRequest[]) ?? []);
-      setBookings((bookRes.data as ClientBooking[]) ?? []);
-    } catch (error) {
-      showToast('error', t('clientDetail.loadError'));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [id, t]);
-
-  useEffect(() => { fetchAll(); }, [fetchAll]);
-
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchAll();
-  }, [fetchAll]);
 
   // ─── Client Edit ─────────────────────────────────────────────
 
@@ -190,13 +202,17 @@ export default function ClientDetailScreen() {
         phone: clientForm.phone.trim() || null,
         company: clientForm.company.trim() || null,
       };
-      const { error } = await supabase.from('clients')
-        .update(payload)
-        .eq('id', client.id)
-        .eq('user_id', user.id);
+      const { error } = await mutate({
+        table: 'clients',
+        operation: 'update',
+        data: payload,
+        matchColumn: 'id',
+        matchValue: client.id,
+        cacheKeys: [`client_detail:${id}`],
+      });
       if (error) throw error;
       setShowEditModal(false);
-      fetchAll();
+      refresh();
       showToast('success', t('clientDetail.clientUpdated'));
     } catch (error: any) {
       secureLog.error('Client update error:', error);
@@ -218,7 +234,13 @@ export default function ClientDetailScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const { error } = await supabase.from('clients').delete().eq('id', client.id);
+              const { error } = await mutate({
+                table: 'clients',
+                operation: 'delete',
+                matchColumn: 'id',
+                matchValue: client.id,
+                cacheKeys: [`client_detail:${id}`],
+              });
               if (error) throw error;
               showToast('success', t('clientDetail.clientDeleted'));
               router.back();
@@ -234,12 +256,16 @@ export default function ClientDetailScreen() {
   const handleToggleOnboarded = async () => {
     if (!client || !user) return;
     try {
-      const { error } = await supabase.from('clients')
-        .update({ onboarded: !client.onboarded } as any)
-        .eq('id', client.id)
-        .eq('user_id', user.id);
+      const { error } = await mutate({
+        table: 'clients',
+        operation: 'update',
+        data: { onboarded: !client.onboarded },
+        matchColumn: 'id',
+        matchValue: client.id,
+        cacheKeys: [`client_detail:${id}`],
+      });
       if (error) throw error;
-      setClient({ ...client, onboarded: !client.onboarded });
+      refresh();
     } catch (error: any) {
       secureLog.error('Toggle onboarded error:', error);
       showToast('error', error.message || t('clientDetail.loadError'));
@@ -305,13 +331,16 @@ export default function ClientDetailScreen() {
     if (!validatePropertyForm() || !user || !id) return;
     setPropertySaving(true);
     try {
-      const { error } = await supabase.from('properties').insert({
-        ...propertyPayload(), client_id: id, user_id: user.id,
+      const { error } = await mutate({
+        table: 'properties',
+        operation: 'insert',
+        data: { ...propertyPayload(), client_id: id, user_id: user.id },
+        cacheKeys: [`client_detail:${id}`],
       });
       if (error) throw error;
       setShowAddPropertyModal(false);
       resetPropertyForm();
-      fetchAll();
+      refresh();
       showToast('success', t('clientDetail.propertyAdded'));
     } catch (error: any) {
       showToast('error', error.message || t('clientDetail.loadError'));
@@ -324,13 +353,19 @@ export default function ClientDetailScreen() {
     if (!validatePropertyForm() || !selectedProperty) return;
     setPropertySaving(true);
     try {
-      const { error } = await supabase.from('properties')
-        .update(propertyPayload()).eq('id', selectedProperty.id);
+      const { error } = await mutate({
+        table: 'properties',
+        operation: 'update',
+        data: propertyPayload(),
+        matchColumn: 'id',
+        matchValue: selectedProperty.id,
+        cacheKeys: [`client_detail:${id}`],
+      });
       if (error) throw error;
       setShowEditPropertyModal(false);
       setSelectedProperty(null);
       resetPropertyForm();
-      fetchAll();
+      refresh();
       showToast('success', t('clientDetail.propertyUpdated'));
     } catch (error: any) {
       showToast('error', error.message || t('clientDetail.loadError'));
@@ -351,12 +386,17 @@ export default function ClientDetailScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const { error } = await supabase.from('properties')
-                .delete().eq('id', selectedProperty.id);
+              const { error } = await mutate({
+                table: 'properties',
+                operation: 'delete',
+                matchColumn: 'id',
+                matchValue: selectedProperty.id,
+                cacheKeys: [`client_detail:${id}`],
+              });
               if (error) throw error;
               setShowEditPropertyModal(false);
               setSelectedProperty(null);
-              fetchAll();
+              refresh();
               showToast('success', t('clientDetail.propertyDeleted'));
             } catch (error: any) {
               showToast('error', error.message || t('clientDetail.loadError'));
@@ -570,7 +610,7 @@ export default function ClientDetailScreen() {
         contentContainerStyle={styles.scrollContent}
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
       >
         {/* Client Info Card */}
         <View style={[styles.clientCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>

@@ -32,7 +32,11 @@
       "Bash(git rm:*)",
       "Bash(git reset:*)",
       "Bash(/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate:*)",
-      "Bash(ipconfig getifaddr:*)"
+      "Bash(ipconfig getifaddr:*)",
+      "WebFetch(domain:docs.expo.dev)",
+      "WebFetch(domain:adapty.io)",
+      "WebFetch(domain:docs.stripe.com)",
+      "Bash(python:*)"
     ]
   }
 }

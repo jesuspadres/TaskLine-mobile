@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Modal,
   FlatList,
+  TextInput,
   ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,6 +26,8 @@ interface SelectProps {
   onChange: (value: string) => void;
   error?: string;
   containerStyle?: ViewStyle;
+  searchable?: boolean;
+  searchPlaceholder?: string;
 }
 
 export function Select({
@@ -35,11 +38,25 @@ export function Select({
   onChange,
   error,
   containerStyle,
+  searchable = false,
+  searchPlaceholder = 'Search...',
 }: SelectProps) {
   const { colors } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const selectedOption = options.find((opt) => opt.key === value);
+
+  const filteredOptions = useMemo(() => {
+    if (!searchable || !searchQuery.trim()) return options;
+    const q = searchQuery.toLowerCase();
+    return options.filter((opt) => opt.label.toLowerCase().includes(q));
+  }, [options, searchQuery, searchable]);
+
+  const handleClose = () => {
+    setIsOpen(false);
+    setSearchQuery('');
+  };
 
   return (
     <View style={[styles.container, containerStyle]}>
@@ -78,14 +95,17 @@ export function Select({
         visible={isOpen}
         transparent
         animationType="fade"
-        onRequestClose={() => setIsOpen(false)}
+        onRequestClose={handleClose}
       >
         <TouchableOpacity
           style={[styles.overlay, { backgroundColor: colors.overlay }]}
           activeOpacity={1}
-          onPress={() => setIsOpen(false)}
+          onPress={handleClose}
         >
-          <View style={[styles.dropdown, { backgroundColor: colors.surface }]}>
+          <View
+            style={[styles.dropdown, { backgroundColor: colors.surface }]}
+            onStartShouldSetResponder={() => true}
+          >
             <View
               style={[
                 styles.dropdownHeader,
@@ -95,13 +115,34 @@ export function Select({
               <Text style={[styles.dropdownTitle, { color: colors.text }]}>
                 {label || 'Select'}
               </Text>
-              <TouchableOpacity onPress={() => setIsOpen(false)}>
+              <TouchableOpacity onPress={handleClose}>
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
+            {searchable && (
+              <View style={[styles.searchContainer, { borderBottomColor: colors.border }]}>
+                <Ionicons name="search" size={18} color={colors.textTertiary} style={styles.searchIcon} />
+                <TextInput
+                  style={[styles.searchInput, { color: colors.text }]}
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  placeholder={searchPlaceholder}
+                  placeholderTextColor={colors.textTertiary}
+                  autoFocus
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                {searchQuery.length > 0 && (
+                  <TouchableOpacity onPress={() => setSearchQuery('')}>
+                    <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
             <FlatList
-              data={options}
+              data={filteredOptions}
               keyExtractor={(item) => item.key}
+              keyboardShouldPersistTaps="handled"
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={[
@@ -111,7 +152,7 @@ export function Select({
                   ]}
                   onPress={() => {
                     onChange(item.key);
-                    setIsOpen(false);
+                    handleClose();
                   }}
                 >
                   <Text
@@ -136,6 +177,13 @@ export function Select({
                 </TouchableOpacity>
               )}
               style={styles.optionsList}
+              ListEmptyComponent={
+                <View style={styles.emptyContainer}>
+                  <Text style={[styles.emptyText, { color: colors.textTertiary }]}>
+                    No results found
+                  </Text>
+                </View>
+              }
             />
           </View>
         </TouchableOpacity>
@@ -194,6 +242,21 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.lg,
     fontWeight: '600',
   },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: 1,
+  },
+  searchIcon: {
+    marginRight: Spacing.sm,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: FontSizes.md,
+    paddingVertical: Spacing.sm,
+  },
   optionsList: {
     maxHeight: 300,
   },
@@ -206,5 +269,12 @@ const styles = StyleSheet.create({
   },
   optionText: {
     fontSize: FontSizes.md,
+  },
+  emptyContainer: {
+    padding: Spacing.xl,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: FontSizes.sm,
   },
 });

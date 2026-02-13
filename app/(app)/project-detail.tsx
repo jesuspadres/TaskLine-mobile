@@ -1,14 +1,16 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   RefreshControl,
   Alert,
   Share,
   Linking,
+  Modal as RNModal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -23,13 +25,31 @@ import type { SelectOption } from '@/components';
 import { useAuthStore } from '@/stores/authStore';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
+import { useOfflineData } from '@/hooks/useOfflineData';
+import { useOfflineMutation } from '@/hooks/useOfflineMutation';
 import { secureLog } from '@/lib/security';
 import { ENV } from '@/lib/env';
 import type { Project, Task, Invoice, Client, ProjectLineItem } from '@/lib/database.types';
 
-type ProjectStatus = 'active' | 'completed' | 'on_hold' | 'cancelled';
+type ProjectStage = 'planning' | 'in_progress' | 'completed';
 type TaskStatus = 'backlog' | 'pending' | 'in_progress' | 'completed';
 type TaskPriority = 'low' | 'medium' | 'high';
+
+interface ProjectDetailData {
+  project: Project | null;
+  client: Client | null;
+  tasks: Task[];
+  invoices: Invoice[];
+  lineItems: ProjectLineItem[];
+  properties: Array<{
+    id: string;
+    name: string;
+    address_formatted: string | null;
+    address_street: string | null;
+    address_city: string | null;
+    address_state: string | null;
+  }>;
+}
 
 export default function ProjectDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -38,28 +58,80 @@ export default function ProjectDetailScreen() {
   const { colors } = useTheme();
   const { t, locale } = useTranslations();
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [project, setProject] = useState<Project | null>(null);
-  const [client, setClient] = useState<Client | null>(null);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [lineItems, setLineItems] = useState<ProjectLineItem[]>([]);
-  const [properties, setProperties] = useState<Array<{
-    id: string;
-    name: string;
-    address_formatted: string | null;
-    address_street: string | null;
-    address_city: string | null;
-    address_state: string | null;
-  }>>([]);
+  // --- Offline Data ---
+  const { data: projectData, loading, refreshing, refresh } = useOfflineData<ProjectDetailData>(
+    `project_detail:${id}`,
+    async () => {
+      // Fetch project
+      const { data: projData, error: projError } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('id', id!)
+        .single();
+
+      if (projError) throw projError;
+      const projectResult = projData as Project;
+
+      // Fetch related data in parallel
+      const [tasksResult, invoicesResult, lineItemsResult, clientResult, propertiesResult] = await Promise.all([
+        supabase
+          .from('tasks')
+          .select('*')
+          .eq('project_id', id!)
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('invoices')
+          .select('*')
+          .eq('project_id', id!)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('project_line_items')
+          .select('*')
+          .eq('project_id', id!)
+          .order('created_at', { ascending: true }),
+        projectResult.client_id
+          ? supabase
+              .from('clients')
+              .select('*')
+              .eq('id', projectResult.client_id)
+              .single()
+          : Promise.resolve({ data: null, error: null }),
+        projectResult.client_id
+          ? supabase
+              .from('properties')
+              .select('id, name, address_formatted, address_street, address_city, address_state')
+              .eq('client_id', projectResult.client_id)
+              .order('created_at', { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+      return {
+        project: projectResult,
+        client: (clientResult.data as Client) ?? null,
+        tasks: ((tasksResult.data as Task[]) ?? []),
+        invoices: ((invoicesResult.data as Invoice[]) ?? []),
+        lineItems: ((lineItemsResult.data as ProjectLineItem[]) ?? []),
+        properties: ((propertiesResult.data as any) ?? []),
+      };
+    },
+    { enabled: !!id },
+  );
+
+  const { mutate } = useOfflineMutation();
+
+  // Destructure from cached/fetched data with null defaults
+  const project = projectData?.project ?? null;
+  const client = projectData?.client ?? null;
+  const tasks = projectData?.tasks ?? [];
+  const invoices = projectData?.invoices ?? [];
+  const lineItems = projectData?.lineItems ?? [];
+  const properties = projectData?.properties ?? [];
 
   // i18n-safe select options
-  const PROJECT_STATUS_OPTIONS: SelectOption[] = useMemo(() => [
-    { key: 'active', label: t('projects.active') },
-    { key: 'completed', label: t('projects.completed') },
-    { key: 'on_hold', label: t('projects.onHold') },
-    { key: 'cancelled', label: t('projects.cancelled') },
+  const PROJECT_STAGE_OPTIONS: SelectOption[] = useMemo(() => [
+    { key: 'planning', label: t('projectDetail.planning') },
+    { key: 'in_progress', label: t('projectDetail.inProgress') },
+    { key: 'completed', label: t('projectDetail.stageCompleted') },
   ], [t]);
 
   const TASK_STATUS_OPTIONS: SelectOption[] = useMemo(() => [
@@ -80,6 +152,9 @@ export default function ProjectDetailScreen() {
     { key: 'other', label: t('projectDetail.other') },
   ], [t]);
 
+  // Status picker
+  const [showStatusPicker, setShowStatusPicker] = useState(false);
+
   // Edit project modal state
   const [showEditModal, setShowEditModal] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -90,7 +165,7 @@ export default function ProjectDetailScreen() {
     deadline: null as Date | null,
     start_date: null as Date | null,
     estimated_duration_days: '',
-    status: 'active' as ProjectStatus,
+    project_stage: 'planning' as ProjectStage,
   });
   const [editFormErrors, setEditFormErrors] = useState<Record<string, string>>({});
 
@@ -175,104 +250,7 @@ export default function ProjectDetailScreen() {
     }
   }, [colors]);
 
-  // --- Data Fetching ---
-
-  const fetchProject = useCallback(async () => {
-    if (!id) return;
-    try {
-      const { data, error } = await supabase
-        .from('projects')
-        .select('*')
-        .eq('id', id)
-        .single();
-
-      if (error) throw error;
-      setProject(data as Project);
-      return data as Project;
-    } catch (error: any) {
-      secureLog.error('Error fetching project:', error);
-      showToast('error', t('projectDetail.loadError'));
-      return null;
-    }
-  }, [id, t]);
-
-  const fetchClient = useCallback(async (clientId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('clients')
-        .select('*')
-        .eq('id', clientId)
-        .single();
-
-      if (error) throw error;
-      setClient(data as Client);
-    } catch (error: any) {
-      secureLog.error('Error fetching client:', error);
-    }
-  }, []);
-
-  const fetchTasks = useCallback(async () => {
-    if (!id) return;
-    try {
-      const { data, error } = await supabase
-        .from('tasks')
-        .select('*')
-        .eq('project_id', id)
-        .order('created_at', { ascending: true });
-
-      if (error) throw error;
-      setTasks((data as Task[]) ?? []);
-    } catch (error: any) {
-      secureLog.error('Error fetching tasks:', error);
-    }
-  }, [id]);
-
-  const fetchInvoices = useCallback(async () => {
-    if (!id) return;
-    try {
-      const { data, error } = await supabase
-        .from('invoices')
-        .select('*')
-        .eq('project_id', id)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setInvoices((data as Invoice[]) ?? []);
-    } catch (error: any) {
-      secureLog.error('Error fetching invoices:', error);
-    }
-  }, [id]);
-
-  const fetchLineItems = useCallback(async () => {
-    if (!id) return;
-    try {
-      const { data, error } = await supabase
-        .from('project_line_items')
-        .select('*')
-        .eq('project_id', id)
-        .order('created_at', { ascending: true });
-
-      if (error) throw error;
-      setLineItems((data as ProjectLineItem[]) ?? []);
-    } catch (error: any) {
-      secureLog.error('Error fetching line items:', error);
-    }
-  }, [id]);
-
-  const fetchProperties = useCallback(async (clientId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('properties')
-        .select('id, name, address_formatted, address_street, address_city, address_state')
-        .eq('client_id', clientId)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setProperties((data as any) || []);
-    } catch (error: any) {
-      secureLog.error('Error fetching properties:', error);
-    }
-  }, []);
+  // --- Location Picker Data (stays as local fetch since it's on-demand) ---
 
   const fetchAllProperties = useCallback(async () => {
     if (!user) return;
@@ -294,16 +272,19 @@ export default function ProjectDetailScreen() {
     if (!project?.client_id) return;
     setLinkingProperty(true);
     try {
-      const { error } = await supabase
-        .from('properties')
-        .update({ client_id: project.client_id } as any)
-        .eq('id', propertyId);
+      const { error } = await mutate({
+        table: 'properties',
+        operation: 'update',
+        data: { client_id: project.client_id },
+        matchColumn: 'id',
+        matchValue: propertyId,
+        cacheKeys: [`project_detail:${id}`],
+      });
 
       if (error) throw error;
       showToast('success', t('projectDetail.propertyLinked'));
       setShowLocationPicker(false);
-      // Re-fetch client properties to update the list
-      fetchProperties(project.client_id);
+      refresh();
     } catch (error: any) {
       secureLog.error('Error linking property:', error);
       showToast('error', t('projectDetail.updateError'));
@@ -316,27 +297,6 @@ export default function ProjectDetailScreen() {
     await fetchAllProperties();
     setShowLocationPicker(true);
   };
-
-  const fetchAll = useCallback(async () => {
-    const projectData = await fetchProject();
-    const promises: Promise<void>[] = [fetchTasks(), fetchInvoices(), fetchLineItems()];
-    if (projectData?.client_id) {
-      promises.push(fetchClient(projectData.client_id));
-      promises.push(fetchProperties(projectData.client_id));
-    }
-    await Promise.all(promises);
-    setLoading(false);
-    setRefreshing(false);
-  }, [fetchProject, fetchClient, fetchTasks, fetchInvoices, fetchLineItems, fetchProperties]);
-
-  useEffect(() => {
-    fetchAll();
-  }, [fetchAll]);
-
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchAll();
-  }, [fetchAll]);
 
   // --- Computed Values ---
 
@@ -371,7 +331,7 @@ export default function ProjectDetailScreen() {
       deadline: project.deadline ? new Date(project.deadline) : null,
       start_date: project.start_date ? new Date(project.start_date) : null,
       estimated_duration_days: project.estimated_duration_days?.toString() || '',
-      status: project.status,
+      project_stage: ((project as any).project_stage || 'planning') as ProjectStage,
     });
     setEditFormErrors({});
     setShowEditModal(true);
@@ -394,29 +354,59 @@ export default function ProjectDetailScreen() {
 
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from('projects')
-        .update({
+      const { error } = await mutate({
+        table: 'projects',
+        operation: 'update',
+        data: {
           name: editForm.name.trim(),
           description: editForm.description.trim() || null,
           budget_total: editForm.budget_total ? Number(editForm.budget_total) : null,
           deadline: editForm.deadline?.toISOString() || null,
           start_date: editForm.start_date?.toISOString() || null,
           estimated_duration_days: editForm.estimated_duration_days ? parseInt(editForm.estimated_duration_days) : null,
-          status: editForm.status,
-        })
-        .eq('id', project.id);
+          project_stage: editForm.project_stage,
+        },
+        matchColumn: 'id',
+        matchValue: project.id,
+        cacheKeys: [`project_detail:${id}`],
+      });
 
       if (error) throw error;
 
       setShowEditModal(false);
-      fetchProject();
+      refresh();
       showToast('success', t('projectDetail.projectUpdated'));
     } catch (error: any) {
       secureLog.error('Error updating project:', error);
       showToast('error', error.message || t('projectDetail.updateError'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  // --- Quick Status Change ---
+
+  const handleQuickStageChange = async (newStage: ProjectStage) => {
+    if (!project || (project as any).project_stage === newStage) {
+      setShowStatusPicker(false);
+      return;
+    }
+    setShowStatusPicker(false);
+    try {
+      const { error } = await mutate({
+        table: 'projects',
+        operation: 'update',
+        data: { project_stage: newStage },
+        matchColumn: 'id',
+        matchValue: project.id,
+        cacheKeys: [`project_detail:${id}`],
+      });
+      if (error) throw error;
+      refresh();
+      showToast('success', t('projectDetail.projectUpdated'));
+    } catch (error: any) {
+      secureLog.error('Error updating project stage:', error);
+      showToast('error', error.message || t('projectDetail.updateError'));
     }
   };
 
@@ -434,10 +424,14 @@ export default function ProjectDetailScreen() {
           text: t('projectDetail.archive'),
           onPress: async () => {
             try {
-              const { error } = await supabase
-                .from('projects')
-                .update({ status: 'archived' } as any)
-                .eq('id', project.id);
+              const { error } = await mutate({
+                table: 'projects',
+                operation: 'update',
+                data: { status: 'archived' },
+                matchColumn: 'id',
+                matchValue: project.id,
+                cacheKeys: [`project_detail:${id}`],
+              });
 
               if (error) throw error;
               showToast('success', t('projectDetail.projectArchived'));
@@ -467,17 +461,23 @@ export default function ProjectDetailScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const { error: tasksError } = await supabase
-                .from('tasks')
-                .delete()
-                .eq('project_id', project.id);
+              const { error: tasksError } = await mutate({
+                table: 'tasks',
+                operation: 'delete',
+                matchColumn: 'project_id',
+                matchValue: project.id,
+                cacheKeys: [`project_detail:${id}`],
+              });
 
               if (tasksError) throw tasksError;
 
-              const { error } = await supabase
-                .from('projects')
-                .delete()
-                .eq('id', project.id);
+              const { error } = await mutate({
+                table: 'projects',
+                operation: 'delete',
+                matchColumn: 'id',
+                matchValue: project.id,
+                cacheKeys: [`project_detail:${id}`],
+              });
 
               if (error) throw error;
 
@@ -521,7 +521,7 @@ export default function ProjectDetailScreen() {
         message: `${t('projectDetail.approvalShareMessage', { projectName: project.name, clientName: client.name })}\n\n${approvalUrl}`,
       });
 
-      fetchProject();
+      refresh();
       showToast('success', t('projectDetail.approvalSent'));
     } catch (error: any) {
       if (error?.message === 'User did not share') return; // Share cancelled
@@ -534,13 +534,17 @@ export default function ProjectDetailScreen() {
 
   const handleTaskStatusChange = async (task: Task, newStatus: TaskStatus) => {
     try {
-      const { error } = await supabase
-        .from('tasks')
-        .update({ status: newStatus } as any)
-        .eq('id', task.id);
+      const { error } = await mutate({
+        table: 'tasks',
+        operation: 'update',
+        data: { status: newStatus },
+        matchColumn: 'id',
+        matchValue: task.id,
+        cacheKeys: [`project_detail:${id}`],
+      });
 
       if (error) throw error;
-      fetchTasks();
+      refresh();
     } catch (error: any) {
       secureLog.error('Error updating task status:', error);
       showToast('error', error.message || t('projectDetail.updateError'));
@@ -578,19 +582,24 @@ export default function ProjectDetailScreen() {
 
     setSavingTask(true);
     try {
-      const { error } = await supabase.from('tasks').insert({
-        project_id: project.id,
-        title: taskForm.title.trim(),
-        description: taskForm.description.trim() || null,
-        priority: taskForm.priority,
-        due_date: taskForm.due_date?.toISOString().split('T')[0] || null,
-        status: 'pending' as TaskStatus,
-      } as any);
+      const { error } = await mutate({
+        table: 'tasks',
+        operation: 'insert',
+        data: {
+          project_id: project.id,
+          title: taskForm.title.trim(),
+          description: taskForm.description.trim() || null,
+          priority: taskForm.priority,
+          due_date: taskForm.due_date?.toISOString().split('T')[0] || null,
+          status: 'pending',
+        },
+        cacheKeys: [`project_detail:${id}`],
+      });
 
       if (error) throw error;
 
       setShowAddTaskModal(false);
-      fetchTasks();
+      refresh();
       showToast('success', t('projectDetail.taskAdded'));
     } catch (error: any) {
       secureLog.error('Error adding task:', error);
@@ -611,9 +620,15 @@ export default function ProjectDetailScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const { error } = await supabase.from('tasks').delete().eq('id', task.id);
+              const { error } = await mutate({
+                table: 'tasks',
+                operation: 'delete',
+                matchColumn: 'id',
+                matchValue: task.id,
+                cacheKeys: [`project_detail:${id}`],
+              });
               if (error) throw error;
-              fetchTasks();
+              refresh();
               showToast('success', t('projectDetail.taskDeleted'));
             } catch (error: any) {
               secureLog.error('Error deleting task:', error);
@@ -672,37 +687,46 @@ export default function ProjectDetailScreen() {
       const amount = qty * price;
 
       if (editingItem) {
-        const { error } = await supabase
-          .from('project_line_items')
-          .update({
+        const { error } = await mutate({
+          table: 'project_line_items',
+          operation: 'update',
+          data: {
             item_type: itemForm.item_type,
             description: itemForm.description.trim(),
             quantity: qty,
             unit_price: price,
             total_price: amount,
             notes: itemForm.notes.trim() || null,
-          } as any)
-          .eq('id', editingItem.id);
+          },
+          matchColumn: 'id',
+          matchValue: editingItem.id,
+          cacheKeys: [`project_detail:${id}`],
+        });
 
         if (error) throw error;
         showToast('success', t('projectDetail.itemUpdated'));
       } else {
-        const { error } = await supabase.from('project_line_items').insert({
-          project_id: project.id,
-          item_type: itemForm.item_type,
-          description: itemForm.description.trim(),
-          quantity: qty,
-          unit_price: price,
-          total_price: amount,
-          notes: itemForm.notes.trim() || null,
-        } as any);
+        const { error } = await mutate({
+          table: 'project_line_items',
+          operation: 'insert',
+          data: {
+            project_id: project.id,
+            item_type: itemForm.item_type,
+            description: itemForm.description.trim(),
+            quantity: qty,
+            unit_price: price,
+            total_price: amount,
+            notes: itemForm.notes.trim() || null,
+          },
+          cacheKeys: [`project_detail:${id}`],
+        });
         if (error) throw error;
         showToast('success', t('projectDetail.itemAdded'));
       }
 
       setShowAddItemModal(false);
       setEditingItem(null);
-      fetchLineItems();
+      refresh();
     } catch (error: any) {
       secureLog.error('Error saving line item:', error);
       showToast('error', error.message || t('projectDetail.updateError'));
@@ -722,9 +746,15 @@ export default function ProjectDetailScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const { error } = await supabase.from('project_line_items').delete().eq('id', item.id);
+              const { error } = await mutate({
+                table: 'project_line_items',
+                operation: 'delete',
+                matchColumn: 'id',
+                matchValue: item.id,
+                cacheKeys: [`project_detail:${id}`],
+              });
               if (error) throw error;
-              fetchLineItems();
+              refresh();
               showToast('success', t('projectDetail.itemDeleted'));
             } catch (error: any) {
               secureLog.error('Error deleting line item:', error);
@@ -796,7 +826,14 @@ export default function ProjectDetailScreen() {
           <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
             {project.name}
           </Text>
-          <StatusBadge status={project.status} size="sm" />
+          <TouchableOpacity
+            style={styles.statusPickerTrigger}
+            onPress={() => setShowStatusPicker(true)}
+            activeOpacity={0.7}
+          >
+            <StatusBadge status={(project as any).project_stage || 'planning'} size="sm" />
+            <Ionicons name="chevron-down" size={12} color={colors.textTertiary} />
+          </TouchableOpacity>
         </View>
         <View style={styles.headerActions}>
           <TouchableOpacity
@@ -818,7 +855,7 @@ export default function ProjectDetailScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl refreshing={refreshing} onRefresh={refresh} />
         }
         keyboardDismissMode="on-drag"
       >
@@ -1010,54 +1047,6 @@ export default function ProjectDetailScreen() {
           </Text>
         </View>
 
-        {/* Budget Breakdown Section */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('projectDetail.lineItems')}</Text>
-            <TouchableOpacity
-              style={[styles.addButton, { backgroundColor: colors.primary }]}
-              onPress={openAddItemModal}
-            >
-              <Ionicons name="add" size={20} color="#fff" />
-              <Text style={styles.addButtonText}>{t('projectDetail.addItem')}</Text>
-            </TouchableOpacity>
-          </View>
-
-          {lineItems.length === 0 ? (
-            <View style={[styles.emptySection, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Ionicons name="receipt-outline" size={32} color={colors.textTertiary} />
-              <Text style={[styles.emptySectionText, { color: colors.textTertiary }]}>{t('projectDetail.noLineItems')}</Text>
-            </View>
-          ) : (
-            <>
-              {lineItems.map((item) => (
-                <TouchableOpacity
-                  key={item.id}
-                  style={[styles.lineItemCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                  onPress={() => openEditItemModal(item)}
-                  onLongPress={() => handleDeleteItem(item)}
-                >
-                  <View style={styles.lineItemContent}>
-                    <Text style={[styles.lineItemDescription, { color: colors.text }]} numberOfLines={1}>
-                      {item.description}
-                    </Text>
-                    <Text style={[styles.lineItemFormula, { color: colors.textTertiary }]}>
-                      {item.quantity} x {formatCurrency(item.unit_price)}
-                    </Text>
-                  </View>
-                  <Text style={[styles.lineItemAmount, { color: colors.text }]}>
-                    {formatCurrency((item as any).total_price || item.amount || 0)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-              <View style={[styles.lineItemTotalRow, { borderTopColor: colors.border }]}>
-                <Text style={[styles.lineItemTotalLabel, { color: colors.textSecondary }]}>{t('projectDetail.budgetTotal')}</Text>
-                <Text style={[styles.lineItemTotalValue, { color: colors.text }]}>{formatCurrency(lineItemsTotal)}</Text>
-              </View>
-            </>
-          )}
-        </View>
-
         {/* Tasks Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -1094,7 +1083,7 @@ export default function ProjectDetailScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.taskContent}
-                  onPress={() => router.push('/(app)/tasks' as any)}
+                  onPress={() => router.push({ pathname: '/(app)/tasks', params: { id: task.id } } as any)}
                   activeOpacity={0.7}
                 >
                   <Text
@@ -1153,6 +1142,54 @@ export default function ProjectDetailScreen() {
           )}
         </View>
 
+        {/* Budget Breakdown Section */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('projectDetail.lineItems')}</Text>
+            <TouchableOpacity
+              style={[styles.addButton, { backgroundColor: colors.primary }]}
+              onPress={openAddItemModal}
+            >
+              <Ionicons name="add" size={20} color="#fff" />
+              <Text style={styles.addButtonText}>{t('projectDetail.addItem')}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {lineItems.length === 0 ? (
+            <View style={[styles.emptySection, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Ionicons name="receipt-outline" size={32} color={colors.textTertiary} />
+              <Text style={[styles.emptySectionText, { color: colors.textTertiary }]}>{t('projectDetail.noLineItems')}</Text>
+            </View>
+          ) : (
+            <>
+              {lineItems.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.lineItemCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  onPress={() => openEditItemModal(item)}
+                  onLongPress={() => handleDeleteItem(item)}
+                >
+                  <View style={styles.lineItemContent}>
+                    <Text style={[styles.lineItemDescription, { color: colors.text }]} numberOfLines={1}>
+                      {item.description}
+                    </Text>
+                    <Text style={[styles.lineItemFormula, { color: colors.textTertiary }]}>
+                      {item.quantity} x {formatCurrency(item.unit_price)}
+                    </Text>
+                  </View>
+                  <Text style={[styles.lineItemAmount, { color: colors.text }]}>
+                    {formatCurrency((item as any).total_price || item.amount || 0)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              <View style={[styles.lineItemTotalRow, { borderTopColor: colors.border }]}>
+                <Text style={[styles.lineItemTotalLabel, { color: colors.textSecondary }]}>{t('projectDetail.budgetTotal')}</Text>
+                <Text style={[styles.lineItemTotalValue, { color: colors.text }]}>{formatCurrency(lineItemsTotal)}</Text>
+              </View>
+            </>
+          )}
+        </View>
+
         {/* Invoices Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -1191,9 +1228,11 @@ export default function ProjectDetailScreen() {
             </View>
           ) : (
             invoices.map((invoice) => (
-              <View
+              <TouchableOpacity
                 key={invoice.id}
                 style={[styles.invoiceCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onPress={() => router.push({ pathname: '/(app)/invoices', params: { id: invoice.id } } as any)}
+                activeOpacity={0.7}
               >
                 <View style={styles.invoiceHeader}>
                   <View style={styles.invoiceHeaderLeft}>
@@ -1217,14 +1256,25 @@ export default function ProjectDetailScreen() {
                     </View>
                   )}
                 </View>
-              </View>
+              </TouchableOpacity>
             ))
           )}
         </View>
 
-        {/* Archive Button */}
+        {/* Complete / Archive Buttons */}
         {(project.status as string) !== 'archived' && (
           <View style={styles.section}>
+            {(project as any).project_stage !== 'completed' && (
+              <TouchableOpacity
+                style={[styles.completeButton, { backgroundColor: colors.successLight, borderColor: colors.success + '30' }]}
+                onPress={() => handleQuickStageChange('completed')}
+              >
+                <Ionicons name="checkmark-circle-outline" size={20} color={colors.success} />
+                <Text style={[styles.completeButtonText, { color: colors.success }]}>
+                  {t('projectDetail.completeProject')}
+                </Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={[styles.archiveButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
               onPress={handleArchiveProject}
@@ -1237,6 +1287,48 @@ export default function ProjectDetailScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Status Picker */}
+      <RNModal
+        visible={showStatusPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowStatusPicker(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setShowStatusPicker(false)}>
+          <View style={styles.statusPickerOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.statusPickerSheet, { backgroundColor: colors.surface }]}>
+                <Text style={[styles.statusPickerTitle, { color: colors.text }]}>
+                  {t('projectDetail.changeStatus')}
+                </Text>
+                {PROJECT_STAGE_OPTIONS.map((option) => {
+                  const isActive = ((project as any).project_stage || 'planning') === option.key;
+                  return (
+                    <TouchableOpacity
+                      key={option.key}
+                      style={[
+                        styles.statusPickerOption,
+                        isActive && { backgroundColor: colors.primaryLight || colors.infoLight },
+                      ]}
+                      onPress={() => handleQuickStageChange(option.key as ProjectStage)}
+                      activeOpacity={0.7}
+                    >
+                      <StatusBadge status={option.key} size="sm" />
+                      <Text style={[styles.statusPickerLabel, { color: colors.text }]}>
+                        {option.label}
+                      </Text>
+                      {isActive && (
+                        <Ionicons name="checkmark" size={18} color={colors.primary} style={{ marginLeft: 'auto' }} />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </RNModal>
 
       {/* Edit Project Modal */}
       <Modal
@@ -1298,10 +1390,10 @@ export default function ProjectDetailScreen() {
         />
 
         <Select
-          label={t('projects.status')}
-          options={PROJECT_STATUS_OPTIONS}
-          value={editForm.status}
-          onChange={(value) => setEditForm({ ...editForm, status: value as ProjectStatus })}
+          label={t('projectDetail.stage')}
+          options={PROJECT_STAGE_OPTIONS}
+          value={editForm.project_stage}
+          onChange={(value) => setEditForm({ ...editForm, project_stage: value as ProjectStage })}
         />
 
         <View style={[styles.modalActions, { borderTopColor: colors.border }]}>
@@ -2008,6 +2100,20 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.sm,
     fontWeight: '600',
   },
+  completeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.xl,
+    borderWidth: 1,
+    marginBottom: Spacing.sm,
+  },
+  completeButtonText: {
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
+  },
 
   // Workflow extras
   workflowDesc: {
@@ -2040,5 +2146,43 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     minWidth: 100,
+  },
+
+  // Status picker
+  statusPickerTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  statusPickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing['2xl'],
+  },
+  statusPickerSheet: {
+    width: '100%',
+    maxWidth: 320,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+  },
+  statusPickerTitle: {
+    fontSize: FontSizes.md,
+    fontWeight: '700',
+    marginBottom: Spacing.md,
+  },
+  statusPickerOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: BorderRadius.lg,
+    marginBottom: Spacing.xs,
+  },
+  statusPickerLabel: {
+    fontSize: FontSizes.sm,
+    fontWeight: '500',
   },
 });

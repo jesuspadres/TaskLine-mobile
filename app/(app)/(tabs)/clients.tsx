@@ -7,13 +7,17 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
+import { useCollapsibleFilters } from '@/hooks/useCollapsibleFilters';
 import { useTranslations } from '@/hooks/useTranslations';
+import { useOfflineData } from '@/hooks/useOfflineData';
+import { useOfflineMutation } from '@/hooks/useOfflineMutation';
 import {
   SearchBar, FilterChips, Badge, Avatar, EmptyState,
   Modal, Input, Button, ListSkeleton, showToast,
@@ -30,12 +34,32 @@ export default function ClientsScreen() {
   const { t, locale } = useTranslations();
   const router = useRouter();
   const { create } = useLocalSearchParams<{ create?: string }>();
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [clients, setClients] = useState<Client[]>([]);
+  const { filterContainerStyle, onFilterLayout, onScroll, filterHeight } = useCollapsibleFilters();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterOnboarded, setFilterOnboarded] = useState<string>('all');
   const [sortBy, setSortBy] = useState<SortKey>('newest');
+
+  const { data: clients, loading, refreshing, refresh } = useOfflineData<Client[]>(
+    'clients',
+    async () => {
+      let query = supabase
+        .from('clients')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (filterOnboarded === 'yes') {
+        query = query.eq('onboarded', true);
+      } else if (filterOnboarded === 'no') {
+        query = query.eq('onboarded', false);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data as Client[]) ?? [];
+    },
+    { deps: [filterOnboarded] },
+  );
+  const { mutate } = useOfflineMutation();
 
   // Modal state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -65,40 +89,9 @@ export default function ClientsScreen() {
     { key: 'nameZA', label: t('clients.nameZA') },
   ], [t]);
 
-  const fetchClients = useCallback(async () => {
-    try {
-      let query = supabase
-        .from('clients')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (filterOnboarded === 'yes') {
-        query = query.eq('onboarded', true);
-      } else if (filterOnboarded === 'no') {
-        query = query.eq('onboarded', false);
-      }
-
-      const { data, error } = await query;
-
-      if (error) throw error;
-      setClients((data as Client[]) ?? []);
-    } catch (error) {
-      console.error('Error fetching clients:', error);
-      showToast('error', t('clients.loadError'));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [filterOnboarded, t]);
-
-  useEffect(() => {
-    fetchClients();
-  }, [fetchClients]);
-
   const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchClients();
-  }, [fetchClients]);
+    refresh();
+  }, [refresh]);
 
   const validateForm = () => {
     const errors: Record<string, string> = {};
@@ -132,14 +125,19 @@ export default function ClientsScreen() {
         onboarded: false,
       };
 
-      const { error } = await supabase.from('clients').insert(newClient as any);
+      const { error } = await mutate({
+        table: 'clients',
+        operation: 'insert',
+        data: newClient,
+        cacheKeys: ['clients'],
+      });
 
       if (error) throw error;
 
       setShowAddModal(false);
       setFormData({ name: '', email: '', phone: '', company: '' });
       setFormErrors({});
-      fetchClients();
+      refresh();
       showToast('success', t('clients.clientAdded'));
     } catch (error: any) {
       console.error('Error adding client:', error);
@@ -154,15 +152,18 @@ export default function ClientsScreen() {
 
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from('clients')
-        .update({
+      const { error } = await mutate({
+        table: 'clients',
+        operation: 'update',
+        data: {
           name: formData.name.trim(),
           email: formData.email.trim().toLowerCase(),
           phone: formData.phone.trim() || null,
           company: formData.company.trim() || null,
-        } as any)
-        .eq('id', selectedClient.id);
+        },
+        matchValue: selectedClient.id,
+        cacheKeys: ['clients'],
+      });
 
       if (error) throw error;
 
@@ -170,7 +171,7 @@ export default function ClientsScreen() {
       setSelectedClient(null);
       setFormData({ name: '', email: '', phone: '', company: '' });
       setFormErrors({});
-      fetchClients();
+      refresh();
       showToast('success', t('clients.clientUpdated'));
     } catch (error: any) {
       console.error('Error updating client:', error);
@@ -191,16 +192,18 @@ export default function ClientsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const { error } = await supabase
-                .from('clients')
-                .delete()
-                .eq('id', client.id);
+              const { error } = await mutate({
+                table: 'clients',
+                operation: 'delete',
+                matchValue: client.id,
+                cacheKeys: ['clients'],
+              });
 
               if (error) throw error;
 
               setShowEditModal(false);
               setSelectedClient(null);
-              fetchClients();
+              refresh();
               showToast('success', t('clients.clientDeleted'));
             } catch (error: any) {
               showToast('error', error.message || t('clients.loadError'));
@@ -213,15 +216,18 @@ export default function ClientsScreen() {
 
   const handleToggleOnboarded = async (client: Client) => {
     try {
-      const { error } = await supabase
-        .from('clients')
-        .update({ onboarded: !client.onboarded })
-        .eq('id', client.id);
+      const { error } = await mutate({
+        table: 'clients',
+        operation: 'update',
+        data: { onboarded: !client.onboarded },
+        matchValue: client.id,
+        cacheKeys: ['clients'],
+      });
 
       if (error) throw error;
 
       setSelectedClient({ ...client, onboarded: !client.onboarded });
-      fetchClients();
+      refresh();
     } catch (error: any) {
       showToast('error', error.message || t('clients.loadError'));
     }
@@ -254,7 +260,7 @@ export default function ClientsScreen() {
   }, [create]);
 
   const filteredAndSortedClients = useMemo(() => {
-    let result = clients.filter((client) => {
+    let result = (clients ?? []).filter((client) => {
       const query = searchQuery.toLowerCase();
       return (
         client.name.toLowerCase().includes(query) ||
@@ -288,7 +294,7 @@ export default function ClientsScreen() {
 
   const dateLocale = locale === 'es' ? 'es-ES' : 'en-US';
 
-  const renderClient = ({ item }: { item: Client }) => (
+  const renderClient = useCallback(({ item }: { item: Client }) => (
     <TouchableOpacity
       style={[styles.clientCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
       onPress={() => navigateToDetail(item)}
@@ -315,7 +321,7 @@ export default function ClientsScreen() {
         <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
       </View>
     </TouchableOpacity>
-  );
+  ), [colors, t, navigateToDetail, openEditModal]);
 
   const renderFormContent = () => (
     <View>
@@ -377,7 +383,7 @@ export default function ClientsScreen() {
         <View style={styles.headerLeft}>
           <Text style={[styles.title, { color: colors.text }]}>{t('clients.title')}</Text>
           <View style={[styles.countBadge, { backgroundColor: colors.infoLight }]}>
-            <Text style={[styles.countBadgeText, { color: colors.primary }]}>{clients.length}</Text>
+            <Text style={[styles.countBadgeText, { color: colors.primary }]}>{(clients ?? []).length}</Text>
           </View>
         </View>
         <TouchableOpacity style={[styles.addButton, { backgroundColor: colors.primary }]} onPress={openAddModal}>
@@ -385,53 +391,59 @@ export default function ClientsScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Search */}
-      <View style={styles.searchContainer}>
-        <SearchBar
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          placeholder={t('clients.searchPlaceholder')}
-        />
-      </View>
+      {/* Search + Filters + Sort + Client List */}
+      <View style={{ flex: 1, overflow: 'hidden' }}>
+        <Animated.View style={[filterContainerStyle, { backgroundColor: colors.background }]} onLayout={onFilterLayout}>
+          <View style={styles.searchContainer}>
+            <SearchBar
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder={t('clients.searchPlaceholder')}
+            />
+          </View>
+          <View style={styles.filterContainer}>
+            <FilterChips
+              options={filterOptions}
+              selected={filterOnboarded}
+              onSelect={setFilterOnboarded}
+            />
+          </View>
+          <View style={styles.sortRow}>
+            {sortOptions.map((option) => (
+              <TouchableOpacity
+                key={option.key}
+                style={[
+                  styles.sortChip,
+                  { borderColor: colors.border },
+                  sortBy === option.key && { backgroundColor: colors.primary, borderColor: colors.primary },
+                ]}
+                onPress={() => setSortBy(option.key as SortKey)}
+              >
+                <Text style={[
+                  styles.sortChipText,
+                  { color: colors.textSecondary },
+                  sortBy === option.key && { color: '#fff' },
+                ]}>
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </Animated.View>
 
-      {/* Filters + Sort */}
-      <View style={styles.filterContainer}>
-        <FilterChips
-          options={filterOptions}
-          selected={filterOnboarded}
-          onSelect={setFilterOnboarded}
-        />
-      </View>
-      <View style={styles.sortRow}>
-        {sortOptions.map((option) => (
-          <TouchableOpacity
-            key={option.key}
-            style={[
-              styles.sortChip,
-              { borderColor: colors.border },
-              sortBy === option.key && { backgroundColor: colors.primary, borderColor: colors.primary },
-            ]}
-            onPress={() => setSortBy(option.key as SortKey)}
-          >
-            <Text style={[
-              styles.sortChipText,
-              { color: colors.textSecondary },
-              sortBy === option.key && { color: '#fff' },
-            ]}>
-              {option.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {/* Client List */}
-      <FlatList
-        data={filteredAndSortedClients}
-        renderItem={renderClient}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        keyboardDismissMode="on-drag"
-        keyboardShouldPersistTaps="handled"
+        <Animated.FlatList
+          data={filteredAndSortedClients}
+          renderItem={renderClient}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={[styles.listContent, { paddingTop: filterHeight }]}
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+        removeClippedSubviews
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        initialNumToRender={10}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
@@ -449,6 +461,7 @@ export default function ClientsScreen() {
           />
         }
       />
+      </View>
 
       {/* Add Client Modal */}
       <Modal

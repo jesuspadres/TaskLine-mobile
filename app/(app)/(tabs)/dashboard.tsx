@@ -14,6 +14,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
+import { useOfflineData } from '@/hooks/useOfflineData';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { NotificationBell, CriticalAlertsCard, StatsSkeleton, ListSkeleton, StatusBadge, showToast } from '@/components';
 import type { RequestWithClient, TaskWithProject, ProjectWithRelations } from '@/lib/database.types';
@@ -59,35 +60,26 @@ export default function DashboardScreen() {
   const { colors, isDark } = useTheme();
   const { t, locale } = useTranslations();
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [stats, setStats] = useState<DashboardStats>({
-    totalClients: 0,
-    onboardedClients: 0,
-    totalProjects: 0,
-    activeProjects: 0,
-    totalTasks: 0,
-    completedTasks: 0,
-    pendingApprovals: 0,
-    tasksCompletedThisWeek: 0,
-  });
-  const [revenue, setRevenue] = useState<RevenueData>({
-    totalRevenue: 0,
-    paidRevenue: 0,
-    outstandingRevenue: 0,
-    overdueRevenue: 0,
-  });
-  const [newRequests, setNewRequests] = useState<RequestWithClient[]>([]);
-  const [todayTasks, setTodayTasks] = useState<TaskWithProject[]>([]);
-  const [upcomingDeadlines, setUpcomingDeadlines] = useState<ProjectWithRelations[]>([]);
-  const [upcomingBookings, setUpcomingBookings] = useState<UpcomingBooking[]>([]);
-  const [upcomingTasks, setUpcomingTasks] = useState<TaskWithProject[]>([]);
-  const [recentInvoices, setRecentInvoices] = useState<RecentInvoice[]>([]);
+  interface DashboardData {
+    stats: DashboardStats;
+    revenue: RevenueData;
+    newRequests: RequestWithClient[];
+    todayTasks: TaskWithProject[];
+    upcomingDeadlines: ProjectWithRelations[];
+    upcomingBookings: UpcomingBooking[];
+    upcomingTasks: TaskWithProject[];
+    recentInvoices: RecentInvoice[];
+  }
 
-  const dateLocale = locale === 'es' ? 'es-ES' : 'en-US';
+  const defaultDashboard: DashboardData = {
+    stats: { totalClients: 0, onboardedClients: 0, totalProjects: 0, activeProjects: 0, totalTasks: 0, completedTasks: 0, pendingApprovals: 0, tasksCompletedThisWeek: 0 },
+    revenue: { totalRevenue: 0, paidRevenue: 0, outstandingRevenue: 0, overdueRevenue: 0 },
+    newRequests: [], todayTasks: [], upcomingDeadlines: [], upcomingBookings: [], upcomingTasks: [], recentInvoices: [],
+  };
 
-  const fetchDashboardData = useCallback(async () => {
-    try {
+  const { data: dashboardData, loading, refreshing, refresh } = useOfflineData<DashboardData>(
+    'dashboard',
+    async () => {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const tomorrow = new Date(today);
@@ -142,7 +134,9 @@ export default function DashboardScreen() {
           .eq('status', 'active')
           .order('deadline', { ascending: true })
           .limit(5),
-        supabase.from('invoices').select('total, status'),
+        supabase.from('invoices').select('total, status, issue_date')
+          .gte('issue_date', new Date(today.getFullYear(), today.getMonth(), 1).toISOString())
+          .lt('issue_date', new Date(today.getFullYear(), today.getMonth() + 1, 1).toISOString()),
         supabase
           .from('bookings')
           .select('*, client:clients(name)')
@@ -155,13 +149,11 @@ export default function DashboardScreen() {
           .select('id', { count: 'exact', head: true })
           .eq('status', 'completed')
           .gte('updated_at', weekStart.toISOString()),
-        // Recent invoices with details
         supabase
           .from('invoices')
           .select('id, invoice_number, status, total, due_date, client:clients(name)')
           .order('created_at', { ascending: false })
           .limit(5),
-        // Upcoming tasks (next 7 days, excluding today)
         supabase
           .from('tasks')
           .select('*, project:projects(id, name, client:clients(name))')
@@ -171,17 +163,6 @@ export default function DashboardScreen() {
           .order('due_date', { ascending: true })
           .limit(10),
       ]);
-
-      setStats({
-        totalClients: clientsCountResult.count || 0,
-        onboardedClients: onboardedClientsResult.data?.length || 0,
-        totalProjects: projectsCountResult.count || 0,
-        activeProjects: activeProjectsResult.data?.length || 0,
-        totalTasks: tasksCountResult.count || 0,
-        completedTasks: completedTasksResult.data?.length || 0,
-        pendingApprovals: pendingApprovalsResult.data?.length || 0,
-        tasksCompletedThisWeek: weeklyCompletedResult.count || 0,
-      });
 
       const invoices = invoicesResult.data || [];
       const paidRevenue = invoices
@@ -195,32 +176,37 @@ export default function DashboardScreen() {
         .reduce((sum: number, inv: any) => sum + (inv.total || 0), 0);
       const totalRevenue = paidRevenue + outstandingRevenue + overdueRevenue;
 
-      setRevenue({ totalRevenue, paidRevenue, outstandingRevenue, overdueRevenue });
-      setNewRequests(requestsResult.data || []);
-      setTodayTasks(todayTasksResult.data || []);
-      setUpcomingDeadlines(deadlinesResult.data || []);
-      setUpcomingBookings(bookingsResult.data || []);
-      setRecentInvoices((recentInvoicesResult.data as any) || []);
-      setUpcomingTasks((upcomingTasksResult.data as any) || []);
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
-      showToast('error', t('dashboard.loadError'));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [t]);
+      return {
+        stats: {
+          totalClients: clientsCountResult.count || 0,
+          onboardedClients: onboardedClientsResult.data?.length || 0,
+          totalProjects: projectsCountResult.count || 0,
+          activeProjects: activeProjectsResult.data?.length || 0,
+          totalTasks: tasksCountResult.count || 0,
+          completedTasks: completedTasksResult.data?.length || 0,
+          pendingApprovals: pendingApprovalsResult.data?.length || 0,
+          tasksCompletedThisWeek: weeklyCompletedResult.count || 0,
+        },
+        revenue: { totalRevenue, paidRevenue, outstandingRevenue, overdueRevenue },
+        newRequests: requestsResult.data || [],
+        todayTasks: todayTasksResult.data || [],
+        upcomingDeadlines: deadlinesResult.data || [],
+        upcomingBookings: bookingsResult.data || [],
+        upcomingTasks: (upcomingTasksResult.data as any) || [],
+        recentInvoices: (recentInvoicesResult.data as any) || [],
+      };
+    },
+    { maxAge: 15 * 60 * 1000 }, // 15 min cache for dashboard
+  );
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, [fetchDashboardData]);
+  const { stats, revenue, newRequests, todayTasks, upcomingDeadlines, upcomingBookings, upcomingTasks, recentInvoices } = dashboardData ?? defaultDashboard;
 
   const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchDashboardData();
-  }, [fetchDashboardData]);
+    refresh();
+  }, [refresh]);
 
   const userName = user?.user_metadata?.name || user?.email?.split('@')[0] || 'there';
+  const dateLocale = locale === 'es' ? 'es-MX' : 'en-US';
 
   const todayDate = new Date().toLocaleDateString(dateLocale, {
     weekday: 'long',
@@ -509,6 +495,7 @@ export default function DashboardScreen() {
                     styles.listItem,
                     idx < todayTasks.length - 1 && { borderBottomColor: colors.borderLight, borderBottomWidth: 1 },
                   ]}
+                  onPress={() => router.push({ pathname: '/(app)/tasks', params: { id: task.id } } as any)}
                 >
                   <View
                     style={[
@@ -553,6 +540,7 @@ export default function DashboardScreen() {
                 onPress={() => {
                   if (item.type === 'booking') router.push({ pathname: '/(app)/booking-detail', params: { id: item.id } } as any);
                   else if (item.type === 'deadline') router.push({ pathname: '/(app)/project-detail', params: { id: item.id } } as any);
+                  else if (item.type === 'task') router.push({ pathname: '/(app)/tasks', params: { id: item.id } } as any);
                 }}
               >
                 {item.type === 'booking' && (
@@ -710,7 +698,7 @@ export default function DashboardScreen() {
                       styles.listItem,
                       idx < recentInvoices.length - 1 && { borderBottomColor: colors.borderLight, borderBottomWidth: 1 },
                     ]}
-                    onPress={() => router.push('/(app)/invoices' as any)}
+                    onPress={() => router.push({ pathname: '/(app)/invoices', params: { id: invoice.id } } as any)}
                   >
                     <View style={styles.listItemContent}>
                       <View style={styles.invoiceRow}>

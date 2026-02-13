@@ -1,5 +1,5 @@
 /**
- * Single source of truth for plan/tier information.
+ * Single source of truth for all plan/tier information.
  * Mirrors the website's lib/plans.ts
  */
 
@@ -13,110 +13,191 @@ export interface PlanFeatures {
   storage: string;
   sms: string;
   support: string;
-  scheduler: boolean;
   payments: boolean | 'comingSoon';
+  scheduler: boolean;
+  productCatalog: boolean;
   branding: boolean | 'comingSoon';
   whiteLabel: boolean;
   team: string;
+  clientPortal: boolean;
+  invoices: boolean;
+  projectTracking: boolean;
+  taskManagement: boolean;
+  fileSharing: boolean;
+  emailNotifications: boolean;
 }
 
 export interface PlanData {
-  name: string;
+  nameKey: string;
   slug: TierSlug;
   price: { monthly: number; annual: number };
-  description: string;
+  descriptionKey: string;
   popular?: boolean;
   comingSoon?: boolean;
   features: PlanFeatures;
 }
 
+// ============================================================
+// PLAN DEFINITIONS
+// ============================================================
+
 export const PLANS: PlanData[] = [
   {
-    name: 'Free',
+    nameKey: 'planNames.free',
     slug: 'free',
     price: { monthly: 0, annual: 0 },
-    description: 'Get started with the basics',
+    descriptionKey: 'planDescriptions.free',
     features: {
       clients: '2',
       projects: '5',
       tasks: '20',
-      storage: '500MB',
-      sms: '-',
-      support: 'Email',
-      scheduler: false,
+      storage: '200MB',
+      sms: '\u2014',
+      support: 'supportLevels.email',
       payments: false,
+      scheduler: false,
+      productCatalog: false,
       branding: false,
       whiteLabel: false,
-      team: '-',
+      team: '\u2014',
+      clientPortal: true,
+      invoices: true,
+      projectTracking: true,
+      taskManagement: true,
+      fileSharing: true,
+      emailNotifications: true,
     },
   },
   {
-    name: 'Pro',
+    nameKey: 'planNames.pro',
     slug: 'pro',
     price: { monthly: 19, annual: 15 },
-    description: 'For growing freelancers',
+    descriptionKey: 'planDescriptions.pro',
     features: {
-      clients: '15',
-      projects: '50',
-      tasks: '200',
-      storage: '10GB',
-      sms: '50/month',
-      support: 'Priority',
-      scheduler: false,
+      clients: 'featureValues.unlimited',
+      projects: 'featureValues.unlimited',
+      tasks: 'featureValues.unlimited',
+      storage: '5GB',
+      sms: '\u2014',
+      support: 'supportLevels.priority',
       payments: false,
+      scheduler: true,
+      productCatalog: false,
       branding: false,
       whiteLabel: false,
-      team: '-',
+      team: '\u2014',
+      clientPortal: true,
+      invoices: true,
+      projectTracking: true,
+      taskManagement: true,
+      fileSharing: true,
+      emailNotifications: true,
     },
   },
   {
-    name: 'Plus',
+    nameKey: 'planNames.plus',
     slug: 'plus',
     price: { monthly: 39, annual: 30 },
-    description: 'Full-featured business tools',
+    descriptionKey: 'planDescriptions.plus',
     popular: true,
     features: {
-      clients: 'Unlimited',
-      projects: 'Unlimited',
-      tasks: 'Unlimited',
+      clients: 'featureValues.unlimited',
+      projects: 'featureValues.unlimited',
+      tasks: 'featureValues.unlimited',
       storage: '30GB',
       sms: '200/month',
-      support: 'Priority',
-      scheduler: true,
+      support: 'supportLevels.priority',
       payments: 'comingSoon',
+      scheduler: true,
+      productCatalog: true,
       branding: 'comingSoon',
       whiteLabel: false,
-      team: '-',
+      team: '\u2014',
+      clientPortal: true,
+      invoices: true,
+      projectTracking: true,
+      taskManagement: true,
+      fileSharing: true,
+      emailNotifications: true,
     },
   },
   {
-    name: 'Business',
+    nameKey: 'planNames.business',
     slug: 'business',
     price: { monthly: 79, annual: 60 },
-    description: 'Enterprise-grade solution',
+    descriptionKey: 'planDescriptions.business',
     comingSoon: true,
     features: {
-      clients: 'Unlimited',
-      projects: 'Unlimited',
-      tasks: 'Unlimited',
+      clients: 'featureValues.unlimited',
+      projects: 'featureValues.unlimited',
+      tasks: 'featureValues.unlimited',
       storage: '100GB',
       sms: '1,000/month',
-      support: 'Phone',
-      scheduler: true,
+      support: 'supportLevels.phone',
       payments: true,
+      scheduler: true,
+      productCatalog: true,
       branding: true,
       whiteLabel: true,
-      team: 'Unlimited',
+      team: 'featureValues.unlimited',
+      clientPortal: true,
+      invoices: true,
+      projectTracking: true,
+      taskManagement: true,
+      fileSharing: true,
+      emailNotifications: true,
     },
   },
 ];
 
-export const TIER_ORDER: TierSlug[] = ['free', 'pro', 'plus', 'business'];
+// ============================================================
+// HELPERS
+// ============================================================
 
+/** Get a plan by its slug */
 export function getPlan(slug: TierSlug): PlanData {
   return PLANS.find((p) => p.slug === slug) || PLANS[0];
 }
 
+/** Get the price for a tier and billing period */
 export function getPlanPrice(slug: TierSlug, period: BillingPeriod): number {
   return getPlan(slug).price[period];
 }
+
+/** Tier ordering for upgrade/downgrade comparison */
+export const TIER_ORDER: TierSlug[] = ['free', 'pro', 'plus', 'business'];
+
+/** Simple feature keys for the plans comparison table */
+export const PLAN_FEATURE_KEYS = [
+  'clients',
+  'projects',
+  'tasks',
+  'storage',
+  'sms',
+  'support',
+  'scheduler',
+  'whiteLabel',
+  'team',
+  'payments',
+  'branding',
+] as const;
+
+/** Feature categories for comparison tables */
+export const FEATURE_CATEGORIES = [
+  {
+    categoryKey: 'featureCategories.limits',
+    features: ['clients', 'projects', 'tasks', 'storage', 'team'],
+  },
+  {
+    categoryKey: 'featureCategories.core',
+    features: ['clientPortal', 'invoices', 'projectTracking', 'taskManagement', 'fileSharing'],
+  },
+  {
+    categoryKey: 'featureCategories.communication',
+    features: ['emailNotifications', 'sms', 'support'],
+  },
+  {
+    categoryKey: 'featureCategories.advanced',
+    features: ['scheduler', 'productCatalog', 'payments', 'branding', 'whiteLabel'],
+  },
+] as const;

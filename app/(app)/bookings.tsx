@@ -8,6 +8,7 @@ import {
   RefreshControl,
   ActivityIndicator,
   Alert,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -17,6 +18,8 @@ import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { Modal, Input, Button, Select, DatePicker, EmptyState, Badge, FilterChips } from '@/components';
 import { useAuthStore } from '@/stores/authStore';
 import { useTheme } from '@/hooks/useTheme';
+import { useTranslations } from '@/hooks/useTranslations';
+import { useCollapsibleFilters } from '@/hooks/useCollapsibleFilters';
 import type { Client } from '@/lib/database.types';
 
 interface BookingRow {
@@ -30,11 +33,15 @@ interface BookingRow {
   end_time: string;
   status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
   notes: string | null;
+  invoice_id: string | null;
   created_at: string;
   updated_at: string;
 }
 
-type BookingWithClient = BookingRow & { client?: { id: string; name: string; email: string } };
+type BookingWithClient = BookingRow & {
+  client?: { id: string; name: string; email: string };
+  invoice?: { id: string; status: string } | null;
+};
 
 type BookingStatus = 'pending' | 'confirmed' | 'completed' | 'cancelled';
 type FilterStatus = 'all' | BookingStatus;
@@ -58,6 +65,8 @@ export default function BookingsScreen() {
   const router = useRouter();
   const { create } = useLocalSearchParams<{ create?: string }>();
   const { colors, isDark } = useTheme();
+  const { t } = useTranslations();
+  const { filterContainerStyle, onFilterLayout, onScroll, filterHeight } = useCollapsibleFilters();
   const { user } = useAuthStore();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -92,9 +101,9 @@ export default function BookingsScreen() {
 
   const fetchBookings = useCallback(async () => {
     try {
-      let query = supabase
+      let query = (supabase
         .from('bookings')
-        .select('*, client:clients(id, name, email)')
+        .select('*, client:clients(id, name, email), invoice:invoices(id, status)') as any)
         .order('start_time', { ascending: false });
 
       if (filterStatus !== 'all') {
@@ -334,7 +343,7 @@ export default function BookingsScreen() {
     }
   };
 
-  const clientOptions = clients.map((c) => ({ key: c.id, label: c.name }));
+  const clientOptions = clients.map((c) => ({ key: c.id, label: (c as any).email ? `${c.name} (${(c as any).email})` : c.name }));
 
   const formatDateTime = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -373,7 +382,7 @@ export default function BookingsScreen() {
   ).length;
   const completedCount = bookings.filter((b) => b.status === 'completed').length;
 
-  const renderBooking = ({ item }: { item: BookingWithClient }) => {
+  const renderBooking = useCallback(({ item }: { item: BookingWithClient }) => {
     const itemColors = statusColors[item.status];
 
     return (
@@ -435,9 +444,40 @@ export default function BookingsScreen() {
             )}
           </View>
         )}
+
+        {/* Completed: Invoice status + Create Invoice */}
+        {item.status === 'completed' && (
+          <View style={[styles.quickActions, { borderTopColor: colors.borderLight }]}>
+            {item.invoice_id ? (
+              <>
+                <View style={[styles.invoiceSentBadge, { backgroundColor: colors.successLight }]}>
+                  <Ionicons name="checkmark-circle" size={14} color={colors.success} />
+                  <Text style={[styles.invoiceSentText, { color: colors.success }]}>
+                    {t('bookings.invoiceSent')}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.createInvoiceButton, { backgroundColor: colors.primary }]}
+                  onPress={() => router.push(`/(app)/invoices?create=true&client_id=${item.client_id}` as any)}
+                >
+                  <Ionicons name="document-text-outline" size={14} color="#fff" />
+                  <Text style={styles.createInvoiceText}>{t('bookings.createNewInvoice')}</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <TouchableOpacity
+                style={[styles.createInvoiceButton, { backgroundColor: colors.success }]}
+                onPress={() => router.push(`/(app)/invoices?create=true&client_id=${item.client_id}` as any)}
+              >
+                <Ionicons name="document-text-outline" size={14} color="#fff" />
+                <Text style={styles.createInvoiceText}>{t('bookings.createInvoice')}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
       </TouchableOpacity>
     );
-  };
+  }, [colors, statusColors, openEditModal, formatTimeRange, handleQuickConfirm, handleQuickComplete]);
 
   const renderFormContent = () => (
     <View>
@@ -467,6 +507,7 @@ export default function BookingsScreen() {
         value={formData.client_id}
         onChange={(value) => setFormData({ ...formData, client_id: value })}
         error={formErrors.client_id}
+        searchable
       />
 
       <DatePicker
@@ -547,34 +588,43 @@ export default function BookingsScreen() {
         </View>
       </View>
 
-      {/* Filter Chips */}
-      <View style={styles.filterContainer}>
-        <FilterChips
-          options={filterOptions}
-          selected={filterStatus}
-          onSelect={(value) => setFilterStatus(value as FilterStatus)}
+      {/* Filter Chips + Booking List */}
+      <View style={{ flex: 1, overflow: 'hidden' }}>
+        <Animated.View style={[filterContainerStyle, { backgroundColor: colors.background }]} onLayout={onFilterLayout}>
+          <View style={styles.filterContainer}>
+            <FilterChips
+              options={filterOptions}
+              selected={filterStatus}
+              onSelect={(value) => setFilterStatus(value as FilterStatus)}
+            />
+          </View>
+        </Animated.View>
+
+        <Animated.FlatList
+          data={bookings}
+          renderItem={renderBooking}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={[styles.listContent, { paddingTop: filterHeight }]}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+          removeClippedSubviews
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          initialNumToRender={10}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          ListEmptyComponent={
+            <EmptyState
+              icon="calendar-outline"
+              title="No bookings"
+              description="Create a booking to get started scheduling with clients."
+              actionLabel="Add Booking"
+              onAction={openAddModal}
+            />
+          }
         />
       </View>
-
-      {/* Booking List */}
-      <FlatList
-        data={bookings}
-        renderItem={renderBooking}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        ListEmptyComponent={
-          <EmptyState
-            icon="calendar-outline"
-            title="No bookings"
-            description="Create a booking to get started scheduling with clients."
-            actionLabel="Add Booking"
-            onAction={openAddModal}
-          />
-        }
-      />
 
       {/* Add Booking Modal */}
       <Modal
@@ -771,5 +821,31 @@ const styles = StyleSheet.create({
   },
   deleteButton: {
     marginRight: 'auto',
+  },
+  invoiceSentBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.full,
+  },
+  invoiceSentText: {
+    fontSize: FontSizes.xs,
+    fontWeight: '600',
+  },
+  createInvoiceButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    marginLeft: 'auto',
+  },
+  createInvoiceText: {
+    color: '#fff',
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
   },
 });

@@ -7,16 +7,20 @@ import {
   TouchableOpacity,
   RefreshControl,
   Switch,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { secureLog } from '@/lib/security';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
+import { useCollapsibleFilters } from '@/hooks/useCollapsibleFilters';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
+import { useOfflineData } from '@/hooks/useOfflineData';
+import { useOfflineMutation } from '@/hooks/useOfflineMutation';
 import * as Haptics from 'expo-haptics';
 import {
   SearchBar,
@@ -83,13 +87,24 @@ const initialFormData = {
 
 export default function PropertiesScreen() {
   const router = useRouter();
+  const { create, client_id: paramClientId } = useLocalSearchParams<{ create?: string; client_id?: string }>();
   const { user } = useAuthStore();
   const { colors } = useTheme();
   const { t } = useTranslations();
   const haptics = useHaptics();
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [properties, setProperties] = useState<PropertyWithClient[]>([]);
+  const { filterContainerStyle, onFilterLayout, onScroll, filterHeight } = useCollapsibleFilters();
+  const { data: properties, loading, refreshing, refresh } = useOfflineData<PropertyWithClient[]>(
+    'properties',
+    async () => {
+      const { data, error } = await supabase
+        .from('properties')
+        .select('*, clients(name)')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []) as any;
+    },
+  );
+  const { mutate } = useOfflineMutation();
   const [clients, setClients] = useState<Client[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState<Filters>(defaultFilters);
@@ -175,34 +190,24 @@ export default function PropertiesScreen() {
     }
   }, []);
 
-  const fetchProperties = useCallback(async () => {
-    try {
-      const { data, error } = await supabase
-        .from('properties')
-        .select('*, clients(name)')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setProperties((data as PropertyWithClient[]) ?? []);
-    } catch (error) {
-      secureLog.error('Error fetching properties:', error);
-      showToast('error', t('properties.propertyAddError'));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [t]);
-
   useEffect(() => {
-    fetchProperties();
     fetchClients();
-  }, [fetchProperties, fetchClients]);
+  }, [fetchClients]);
+
+  // Auto-open add modal when navigated with create=true
+  useEffect(() => {
+    if (create === 'true' && !loading) {
+      setFormData({ ...initialFormData, client_id: paramClientId || '' });
+      setFormErrors({});
+      setShowAddModal(true);
+      router.setParams({ create: '', client_id: '' });
+    }
+  }, [create, loading]);
 
   const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchProperties();
+    refresh();
     fetchClients();
-  }, [fetchProperties, fetchClients]);
+  }, [refresh, fetchClients]);
 
   const validateForm = () => {
     const errors: Record<string, string> = {};
@@ -256,7 +261,12 @@ export default function PropertiesScreen() {
         property_notes: formData.notes.trim() || null,
       };
 
-      const { error } = await supabase.from('properties').insert(newProperty as any);
+      const { error } = await mutate({
+        table: 'properties',
+        operation: 'insert',
+        data: newProperty,
+        cacheKeys: ['properties'],
+      });
 
       if (error) throw error;
 
@@ -264,7 +274,7 @@ export default function PropertiesScreen() {
       setShowAddModal(false);
       setFormData(initialFormData);
       setFormErrors({});
-      fetchProperties();
+      refresh();
       showToast('success', t('properties.propertyAdded'));
     } catch (error: any) {
       secureLog.error('Error adding property:', error);
@@ -303,24 +313,25 @@ export default function PropertiesScreen() {
   const clientOptions = useMemo(() =>
     clients.map((c) => ({
       key: c.id,
-      label: c.name,
+      label: c.email ? `${c.name} (${c.email})` : c.name,
     })),
   [clients]);
 
   // Stats — count by property type (matching filter chips)
   const stats = useMemo(() => {
-    const residential = properties.filter(p => (p as any).property_type === 'residential').length;
-    const commercial = properties.filter(p => (p as any).property_type === 'commercial').length;
-    const other = properties.filter(p => {
+    const list = properties ?? [];
+    const residential = list.filter(p => (p as any).property_type === 'residential').length;
+    const commercial = list.filter(p => (p as any).property_type === 'commercial').length;
+    const other = list.filter(p => {
       const pt = (p as any).property_type;
       return pt === 'other' || pt === 'industrial' || !pt;
     }).length;
-    return { total: properties.length, residential, commercial, other };
+    return { total: list.length, residential, commercial, other };
   }, [properties]);
 
   // Filtered + sorted
   const filteredProperties = useMemo(() => {
-    let result = properties.filter((property) => {
+    let result = (properties ?? []).filter((property) => {
       const p = property as any;
       const address = getAddressString(property).toLowerCase();
       const name = property.name.toLowerCase();
@@ -418,7 +429,7 @@ export default function PropertiesScreen() {
     }
   };
 
-  const renderProperty = ({ item }: { item: PropertyWithClient }) => {
+  const renderProperty = useCallback(({ item }: { item: PropertyWithClient }) => {
     const address = getAddressString(item);
     const clientName = item.clients?.name;
     const it = item as any;
@@ -480,7 +491,7 @@ export default function PropertiesScreen() {
         </View>
       </TouchableOpacity>
     );
-  };
+  }, [colors, t, haptics, router, getAddressString, getPropertyTypeIcon, getPropertyTypeLabel]);
 
   const renderFormContent = () => (
     <View>
@@ -501,6 +512,7 @@ export default function PropertiesScreen() {
         value={formData.client_id || null}
         onChange={(value) => setFormData({ ...formData, client_id: value })}
         error={formErrors.client_id}
+        searchable
       />
 
       <Select
@@ -690,10 +702,10 @@ export default function PropertiesScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: colors.text }]}>{t('properties.title')}</Text>
-        {properties.length > 0 && (
+        {(properties ?? []).length > 0 && (
           <View style={[styles.countBadge, { backgroundColor: colors.primary }]}>
             <Text style={styles.countBadgeText}>
-              {properties.length}
+              {(properties ?? []).length}
             </Text>
           </View>
         )}
@@ -706,7 +718,7 @@ export default function PropertiesScreen() {
       </View>
 
       {/* Stats Cards — by property type */}
-      {properties.length > 0 && (
+      {(properties ?? []).length > 0 && (
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
             <StatCard
@@ -759,108 +771,113 @@ export default function PropertiesScreen() {
         </View>
       )}
 
-      {/* Search */}
-      <View style={styles.searchContainer}>
-        <SearchBar
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          placeholder={t('properties.searchPlaceholder')}
-        />
-      </View>
-
-      {/* Filter & Sort Buttons */}
-      <View style={styles.filterRow}>
-        <TouchableOpacity
-          style={[
-            styles.filterButton,
-            { backgroundColor: colors.surface, borderColor: activeFilterCount > 0 ? colors.primary : colors.border },
-          ]}
-          onPress={() => {
-            haptics.impact(Haptics.ImpactFeedbackStyle.Light);
-            setTempFilters(filters);
-            setShowFilterModal(true);
-          }}
-        >
-          <Ionicons name="funnel-outline" size={16} color={activeFilterCount > 0 ? colors.primary : colors.textSecondary} />
-          <Text style={[styles.filterButtonText, { color: activeFilterCount > 0 ? colors.primary : colors.textSecondary }]}>
-            {t('properties.filter')}
-          </Text>
-          {activeFilterCount > 0 && (
-            <View style={[styles.filterBadge, { backgroundColor: colors.primary }]}>
-              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+      {/* Search + Filters + Sort + Property List */}
+      <View style={{ flex: 1, overflow: 'hidden' }}>
+        <Animated.View style={[filterContainerStyle, { backgroundColor: colors.background }]} onLayout={onFilterLayout}>
+          <View style={styles.searchContainer}>
+            <SearchBar
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder={t('properties.searchPlaceholder')}
+            />
+          </View>
+          <View style={styles.filterRow}>
+            <TouchableOpacity
+              style={[
+                styles.filterButton,
+                { backgroundColor: colors.surface, borderColor: activeFilterCount > 0 ? colors.primary : colors.border },
+              ]}
+              onPress={() => {
+                haptics.impact(Haptics.ImpactFeedbackStyle.Light);
+                setTempFilters(filters);
+                setShowFilterModal(true);
+              }}
+            >
+              <Ionicons name="funnel-outline" size={16} color={activeFilterCount > 0 ? colors.primary : colors.textSecondary} />
+              <Text style={[styles.filterButtonText, { color: activeFilterCount > 0 ? colors.primary : colors.textSecondary }]}>
+                {t('properties.filter')}
+              </Text>
+              {activeFilterCount > 0 && (
+                <View style={[styles.filterBadge, { backgroundColor: colors.primary }]}>
+                  <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sortButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              onPress={() => {
+                haptics.impact(Haptics.ImpactFeedbackStyle.Light);
+                setShowSortModal(true);
+              }}
+            >
+              <Ionicons name="swap-vertical" size={16} color={colors.textSecondary} />
+              <Text style={[styles.filterButtonText, { color: colors.textSecondary }]}>
+                {sortOptions.find(o => o.key === sortBy)?.label}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          {activeFilterLabels.length > 0 && (
+            <View style={styles.activeFiltersRow}>
+              {activeFilterLabels.map(({ key, label }) => (
+                <TouchableOpacity
+                  key={key}
+                  style={[styles.activeChip, { backgroundColor: colors.surface, borderColor: colors.primary }]}
+                  onPress={() => {
+                    haptics.selection();
+                    setFilters(prev => ({ ...prev, [key]: 'all' }));
+                  }}
+                >
+                  <Text style={[styles.activeChipText, { color: colors.primary }]}>{label}</Text>
+                  <Ionicons name="close-circle" size={12} color={colors.primary} />
+                </TouchableOpacity>
+              ))}
+              {activeFilterCount > 1 && (
+                <TouchableOpacity
+                  style={[styles.activeChip, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}
+                  onPress={() => {
+                    haptics.selection();
+                    setFilters(defaultFilters);
+                  }}
+                >
+                  <Text style={[styles.activeChipText, { color: colors.textSecondary }]}>{t('properties.resetAll')}</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.sortButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-          onPress={() => {
-            haptics.impact(Haptics.ImpactFeedbackStyle.Light);
-            setShowSortModal(true);
-          }}
-        >
-          <Ionicons name="swap-vertical" size={16} color={colors.textSecondary} />
-          <Text style={[styles.filterButtonText, { color: colors.textSecondary }]}>
-            {sortOptions.find(o => o.key === sortBy)?.label}
-          </Text>
-        </TouchableOpacity>
+        </Animated.View>
+
+        <Animated.FlatList
+          data={filteredProperties}
+          renderItem={renderProperty}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={[styles.listContent, { paddingTop: filterHeight }]}
+          keyboardDismissMode="on-drag"
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+          removeClippedSubviews
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          initialNumToRender={10}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          ListEmptyComponent={
+            <EmptyState
+              icon="home-outline"
+              title={searchQuery || activeFilterCount > 0
+                ? t('properties.noSearchResults')
+                : t('properties.noProperties')
+              }
+              description={searchQuery || activeFilterCount > 0
+                ? t('properties.noSearchResultsDesc')
+                : t('properties.noPropertiesDesc')
+              }
+              actionLabel={!searchQuery && activeFilterCount === 0 ? t('properties.addProperty') : undefined}
+              onAction={!searchQuery && activeFilterCount === 0 ? openAddModal : undefined}
+            />
+          }
+        />
       </View>
-
-      {/* Active Filter Chips */}
-      {activeFilterLabels.length > 0 && (
-        <View style={styles.activeFiltersRow}>
-          {activeFilterLabels.map(({ key, label }) => (
-            <TouchableOpacity
-              key={key}
-              style={[styles.activeChip, { backgroundColor: colors.surface, borderColor: colors.primary }]}
-              onPress={() => {
-                haptics.selection();
-                setFilters(prev => ({ ...prev, [key]: 'all' }));
-              }}
-            >
-              <Text style={[styles.activeChipText, { color: colors.primary }]}>{label}</Text>
-              <Ionicons name="close-circle" size={12} color={colors.primary} />
-            </TouchableOpacity>
-          ))}
-          {activeFilterCount > 1 && (
-            <TouchableOpacity
-              style={[styles.activeChip, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}
-              onPress={() => {
-                haptics.selection();
-                setFilters(defaultFilters);
-              }}
-            >
-              <Text style={[styles.activeChipText, { color: colors.textSecondary }]}>{t('properties.resetAll')}</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
-
-      {/* Property List */}
-      <FlatList
-        data={filteredProperties}
-        renderItem={renderProperty}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        keyboardDismissMode="on-drag"
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        ListEmptyComponent={
-          <EmptyState
-            icon="home-outline"
-            title={searchQuery || activeFilterCount > 0
-              ? t('properties.noSearchResults')
-              : t('properties.noProperties')
-            }
-            description={searchQuery || activeFilterCount > 0
-              ? t('properties.noSearchResultsDesc')
-              : t('properties.noPropertiesDesc')
-            }
-            actionLabel={!searchQuery && activeFilterCount === 0 ? t('properties.addProperty') : undefined}
-            onAction={!searchQuery && activeFilterCount === 0 ? openAddModal : undefined}
-          />
-        }
-      />
 
       {/* Sort Modal */}
       <Modal

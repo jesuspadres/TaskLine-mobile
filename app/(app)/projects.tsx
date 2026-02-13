@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -14,13 +15,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
+import { useCollapsibleFilters } from '@/hooks/useCollapsibleFilters';
 import { useTranslations } from '@/hooks/useTranslations';
+import { useOfflineData } from '@/hooks/useOfflineData';
+import { useOfflineMutation } from '@/hooks/useOfflineMutation';
 import {
   SearchBar, FilterChips, Badge, Avatar, EmptyState,
   Modal, Input, Button, Select, DatePicker, ListSkeleton,
   StatusBadge, showToast,
 } from '@/components';
-import type { ProjectWithRelations, Client, ProjectInsert } from '@/lib/database.types';
+import type { ProjectWithRelations, Client } from '@/lib/database.types';
 import { useAuthStore } from '@/stores/authStore';
 import { secureLog } from '@/lib/security';
 
@@ -30,13 +34,42 @@ export default function ProjectsScreen() {
   const { user } = useAuthStore();
   const { colors } = useTheme();
   const { t, locale } = useTranslations();
+  const { filterContainerStyle, onFilterLayout, onScroll, filterHeight } = useCollapsibleFilters();
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [projects, setProjects] = useState<ProjectWithRelations[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const { mutate } = useOfflineMutation();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+
+  const { data: projects, loading, refreshing, refresh } = useOfflineData<ProjectWithRelations[]>(
+    'projects',
+    async () => {
+      let query = supabase
+        .from('projects')
+        .select('*, client:clients(id, name, email)')
+        .order('created_at', { ascending: false });
+
+      if (filterStatus === 'archived') {
+        query = query.eq('status', 'archived' as any);
+      } else if (filterStatus === 'needs_approval') {
+        query = query.eq('status', 'active')
+          .or('approval_status.is.null,approval_status.eq.not_required,approval_status.eq.declined');
+      } else if (filterStatus === 'pending') {
+        query = query.eq('status', 'active').eq('approval_status', 'pending');
+      } else if (filterStatus === 'approved') {
+        query = query.eq('status', 'active').eq('approval_status', 'approved');
+      } else if (filterStatus === 'in_progress') {
+        query = query.eq('status', 'active').eq('project_stage', 'in_progress' as any);
+      } else if (filterStatus === 'completed') {
+        query = query.eq('status', 'active').eq('project_stage', 'completed' as any);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return data || [];
+    },
+    { deps: [filterStatus] },
+  );
   const [sortBy, setSortBy] = useState<string>('newest');
 
   // Modal state
@@ -46,7 +79,7 @@ export default function ProjectsScreen() {
     name: '',
     description: '',
     client_id: '',
-    status: 'active',
+    project_stage: 'planning',
     approval_status: 'draft',
     budget_total: '',
     deadline: null as Date | null,
@@ -56,10 +89,13 @@ export default function ProjectsScreen() {
 
   // i18n-safe options inside component
   const filterOptions = useMemo(() => [
-    { key: 'all', label: t('projects.all') },
-    { key: 'active', label: t('projects.active') },
-    { key: 'completed', label: t('projects.completed') },
-    { key: 'on_hold', label: t('projects.onHold') },
+    { key: 'all', label: t('projects.allActive') },
+    { key: 'needs_approval', label: t('projects.needsApproval') },
+    { key: 'pending', label: t('projects.pending') },
+    { key: 'approved', label: t('projects.approved') },
+    { key: 'in_progress', label: t('projectDetail.inProgress') },
+    { key: 'completed', label: t('projectDetail.stageCompleted') },
+    { key: 'archived', label: t('status.archived') },
   ], [t]);
 
   const sortOptions = useMemo(() => [
@@ -70,11 +106,10 @@ export default function ProjectsScreen() {
     { key: 'deadline', label: t('projects.deadline') },
   ], [t]);
 
-  const statusOptions = useMemo(() => [
-    { key: 'active', label: t('projects.active') },
-    { key: 'completed', label: t('projects.completed') },
-    { key: 'on_hold', label: t('projects.onHold') },
-    { key: 'cancelled', label: t('projects.cancelled') },
+  const stageOptions = useMemo(() => [
+    { key: 'planning', label: t('projectDetail.planning') },
+    { key: 'in_progress', label: t('projectDetail.inProgress') },
+    { key: 'completed', label: t('projectDetail.stageCompleted') },
   ], [t]);
 
   const approvalOptions = useMemo(() => [
@@ -83,30 +118,6 @@ export default function ProjectsScreen() {
     { key: 'approved', label: t('projects.approved') },
     { key: 'rejected', label: t('projects.rejected') },
   ], [t]);
-
-  const fetchProjects = useCallback(async () => {
-    try {
-      let query = supabase
-        .from('projects')
-        .select('*, client:clients(id, name, email)')
-        .order('created_at', { ascending: false });
-
-      if (filterStatus !== 'all') {
-        query = query.eq('status', filterStatus as 'active' | 'completed' | 'on_hold' | 'cancelled');
-      }
-
-      const { data, error } = await query;
-
-      if (error) throw error;
-      setProjects(data || []);
-    } catch (error: any) {
-      secureLog.error('Error fetching projects:', error);
-      showToast('error', t('projects.loadError'));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [filterStatus, t]);
 
   const fetchClients = useCallback(async () => {
     try {
@@ -123,14 +134,12 @@ export default function ProjectsScreen() {
   }, []);
 
   useEffect(() => {
-    fetchProjects();
     fetchClients();
-  }, [fetchProjects, fetchClients]);
+  }, [fetchClients]);
 
   const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchProjects();
-  }, [fetchProjects]);
+    refresh();
+  }, [refresh]);
 
   const validateForm = () => {
     const errors: Record<string, string> = {};
@@ -153,25 +162,31 @@ export default function ProjectsScreen() {
 
     setSaving(true);
     try {
-      const newProject: ProjectInsert = {
+      const newProject = {
         user_id: user.id,
         client_id: formData.client_id,
         name: formData.name.trim(),
         description: formData.description.trim() || null,
-        status: formData.status as any,
-        approval_status: formData.approval_status as any,
+        status: 'active',
+        project_stage: formData.project_stage,
+        approval_status: formData.approval_status,
         budget_total: formData.budget_total ? parseFloat(formData.budget_total) : null,
         deadline: formData.deadline?.toISOString() || null,
         estimated_duration_days: formData.estimated_duration_days ? parseInt(formData.estimated_duration_days) : null,
-      };
+      } as any;
 
-      const { error } = await supabase.from('projects').insert(newProject);
+      const { error } = await mutate({
+        table: 'projects',
+        operation: 'insert',
+        data: newProject,
+        cacheKeys: ['projects'],
+      });
 
       if (error) throw error;
 
       setShowAddModal(false);
       resetForm();
-      fetchProjects();
+      refresh();
       showToast('success', t('projects.projectAdded'));
     } catch (error: any) {
       secureLog.error('Error adding project:', error);
@@ -192,14 +207,16 @@ export default function ProjectsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const { error } = await supabase
-                .from('projects')
-                .delete()
-                .eq('id', project.id);
+              const { error } = await mutate({
+                table: 'projects',
+                operation: 'delete',
+                matchValue: project.id,
+                cacheKeys: ['projects'],
+              });
 
               if (error) throw error;
 
-              fetchProjects();
+              refresh();
               showToast('success', t('projects.projectDeleted'));
             } catch (error: any) {
               secureLog.error('Error deleting project:', error);
@@ -216,7 +233,7 @@ export default function ProjectsScreen() {
       name: '',
       description: '',
       client_id: '',
-      status: 'active',
+      project_stage: 'planning',
       approval_status: 'draft',
       budget_total: '',
       deadline: null,
@@ -241,7 +258,7 @@ export default function ProjectsScreen() {
   // Filter and sort projects
   const filteredProjects = useMemo(() => {
     const query = searchQuery.toLowerCase();
-    let result = projects.filter((project) => {
+    let result = (projects ?? []).filter((project) => {
       const matchesSearch =
         project.name.toLowerCase().includes(query) ||
         (project.description?.toLowerCase().includes(query) ?? false) ||
@@ -289,11 +306,11 @@ export default function ProjectsScreen() {
   }, [locale]);
 
   const clientOptions = useMemo(() =>
-    clients.map((c) => ({ key: c.id, label: c.name })),
+    clients.map((c) => ({ key: c.id, label: c.email ? `${c.name} (${c.email})` : c.name })),
     [clients]
   );
 
-  const renderProject = ({ item }: { item: ProjectWithRelations }) => (
+  const renderProject = useCallback(({ item }: { item: ProjectWithRelations }) => (
     <TouchableOpacity
       style={[styles.projectCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
       onPress={() => router.push({ pathname: '/(app)/project-detail', params: { id: item.id } } as any)}
@@ -301,12 +318,12 @@ export default function ProjectsScreen() {
     >
       <View style={styles.projectHeader}>
         <View style={styles.badges}>
-          <StatusBadge status={item.status} size="sm" />
-          {item.approval_status && (
+          <StatusBadge status={(item as any).project_stage || 'planning'} size="sm" />
+          {item.approval_status && (item.approval_status as string) !== 'not_required' && (
             <StatusBadge status={item.approval_status} size="sm" />
           )}
-          {(item as any).project_stage && (item as any).project_stage !== 'planning' && (
-            <StatusBadge status={(item as any).project_stage} size="sm" />
+          {(item.status as string) === 'archived' && (
+            <StatusBadge status="archived" size="sm" />
           )}
         </View>
       </View>
@@ -356,7 +373,7 @@ export default function ProjectsScreen() {
         <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} style={styles.chevron} />
       </View>
     </TouchableOpacity>
-  );
+  ), [colors, t, router, handleDeleteProject, formatCurrency, formatDate]);
 
   const renderFormContent = () => (
     <View>
@@ -376,6 +393,7 @@ export default function ProjectsScreen() {
         value={formData.client_id}
         onChange={(value) => setFormData({ ...formData, client_id: value })}
         error={formErrors.client_id}
+        searchable
       />
 
       <Input
@@ -391,10 +409,10 @@ export default function ProjectsScreen() {
       <View style={styles.row}>
         <View style={styles.halfWidth}>
           <Select
-            label={t('projects.status')}
-            options={statusOptions}
-            value={formData.status}
-            onChange={(value) => setFormData({ ...formData, status: value })}
+            label={t('projectDetail.stage')}
+            options={stageOptions}
+            value={formData.project_stage}
+            onChange={(value) => setFormData({ ...formData, project_stage: value })}
           />
         </View>
         <View style={styles.halfWidth}>
@@ -463,7 +481,7 @@ export default function ProjectsScreen() {
         <View style={styles.headerLeft}>
           <Text style={[styles.title, { color: colors.text }]}>{t('projects.title')}</Text>
           <View style={[styles.countBadge, { backgroundColor: colors.infoLight }]}>
-            <Text style={[styles.countBadgeText, { color: colors.primary }]}>{projects.length}</Text>
+            <Text style={[styles.countBadgeText, { color: colors.primary }]}>{(projects ?? []).length}</Text>
           </View>
         </View>
         <TouchableOpacity style={[styles.addButton, { backgroundColor: colors.primary }]} onPress={openAddModal}>
@@ -471,56 +489,62 @@ export default function ProjectsScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Search */}
-      <View style={styles.searchContainer}>
-        <SearchBar
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          placeholder={t('projects.searchPlaceholder')}
+      {/* Search + Filters + Sort + Project List */}
+      <View style={{ flex: 1, overflow: 'hidden' }}>
+        <Animated.View style={[filterContainerStyle, { backgroundColor: colors.background }]} onLayout={onFilterLayout}>
+          <View style={styles.searchContainer}>
+            <SearchBar
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder={t('projects.searchPlaceholder')}
+            />
+          </View>
+          <View style={styles.filterContainer}>
+            <FilterChips
+              options={filterOptions}
+              selected={filterStatus}
+              onSelect={setFilterStatus}
+              scrollable
+            />
+          </View>
+          <View style={styles.filterContainer}>
+            <FilterChips
+              options={sortOptions}
+              selected={sortBy}
+              onSelect={setSortBy}
+            />
+          </View>
+        </Animated.View>
+
+        <Animated.FlatList
+          data={filteredProjects}
+          renderItem={renderProject}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={[styles.listContent, { paddingTop: filterHeight }]}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+          removeClippedSubviews
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          initialNumToRender={10}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          ListEmptyComponent={
+            <EmptyState
+              icon="folder-outline"
+              title={t('projects.noProjects')}
+              description={
+                searchQuery
+                  ? t('projects.noProjectsSearch')
+                  : t('projects.noProjectsDesc')
+              }
+              actionLabel={!searchQuery ? t('projects.addProject') : undefined}
+              onAction={!searchQuery ? openAddModal : undefined}
+            />
+          }
         />
       </View>
-
-      {/* Filter Chips */}
-      <View style={styles.filterContainer}>
-        <FilterChips
-          options={filterOptions}
-          selected={filterStatus}
-          onSelect={setFilterStatus}
-        />
-      </View>
-
-      {/* Sort Chips */}
-      <View style={styles.filterContainer}>
-        <FilterChips
-          options={sortOptions}
-          selected={sortBy}
-          onSelect={setSortBy}
-        />
-      </View>
-
-      {/* Project List */}
-      <FlatList
-        data={filteredProjects}
-        renderItem={renderProject}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        ListEmptyComponent={
-          <EmptyState
-            icon="folder-outline"
-            title={t('projects.noProjects')}
-            description={
-              searchQuery
-                ? t('projects.noProjectsSearch')
-                : t('projects.noProjectsDesc')
-            }
-            actionLabel={!searchQuery ? t('projects.addProject') : undefined}
-            onAction={!searchQuery ? openAddModal : undefined}
-          />
-        }
-      />
 
       {/* Add Project Modal */}
       <Modal

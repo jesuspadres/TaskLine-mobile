@@ -7,18 +7,25 @@ import {
   TouchableOpacity,
   RefreshControl,
   ScrollView,
+  Animated,
+  Platform,
   Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { NotificationFeedbackType } from 'expo-haptics';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 import { supabase } from '@/lib/supabase';
 import { ENV } from '@/lib/env';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
+import { useCollapsibleFilters } from '@/hooks/useCollapsibleFilters';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
+import { useOfflineData } from '@/hooks/useOfflineData';
+import { useOfflineMutation } from '@/hooks/useOfflineMutation';
 import {
   Modal, Input, Button, Select, DatePicker, EmptyState,
   SearchBar, ListSkeleton, ConfirmDialog,
@@ -72,19 +79,32 @@ interface LineItem {
 
 export default function InvoicesScreen() {
   const router = useRouter();
-  const { create, project_id, client_id } = useLocalSearchParams<{
+  const { create, project_id, client_id, id: openInvoiceId } = useLocalSearchParams<{
     create?: string;
     project_id?: string;
     client_id?: string;
+    id?: string;
   }>();
   const { user } = useAuthStore();
   const { colors } = useTheme();
   const { t, locale } = useTranslations();
   const haptics = useHaptics();
+  const { filterContainerStyle, onFilterLayout, onScroll, filterHeight } = useCollapsibleFilters();
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const { data: invoices, loading, refreshing, refresh } = useOfflineData<InvoiceRow[]>(
+    'invoices',
+    async () => {
+      const { data, error } = await supabase
+        .from('invoices')
+        .select('*, project:projects(id, name), client:clients(id, name, email, company)')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return (data as InvoiceRow[]) || [];
+    },
+  );
+  const { mutate } = useOfflineMutation();
+
   const [clients, setClients] = useState<Client[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -181,34 +201,25 @@ export default function InvoicesScreen() {
   ], [t]);
 
   const clientOptions = useMemo(() =>
-    clients.map(c => ({ key: c.id, label: c.name })),
+    clients.map(c => ({ key: c.id, label: c.email ? `${c.name} (${c.email})` : c.name })),
     [clients]
   );
 
+  const clientMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    clients.forEach(c => { map[c.id] = c.name; });
+    return map;
+  }, [clients]);
+
   const projectOptions = useMemo(() => [
     { key: '', label: t('invoices.noProject') },
-    ...projects.map(p => ({ key: p.id, label: p.name })),
-  ], [projects, t]);
+    ...projects.map(p => {
+      const clientName = (p as any).client_id ? clientMap[(p as any).client_id] : null;
+      return { key: p.id, label: clientName ? `${p.name} (${clientName})` : p.name };
+    }),
+  ], [projects, t, clientMap]);
 
-  // ─── Data fetching ──────────────────────────────────────
-  const fetchInvoices = useCallback(async () => {
-    try {
-      const { data, error } = await supabase
-        .from('invoices')
-        .select('*, project:projects(id, name), client:clients(id, name, email, company)')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setInvoices((data as InvoiceRow[]) || []);
-    } catch (error) {
-      secureLog.error('Error fetching invoices:', error);
-      showToast('error', t('invoices.loadError'));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [t]);
-
+  // ─── Data fetching (clients/projects for dropdowns) ────
   const fetchClients = useCallback(async () => {
     try {
       const { data, error } = await supabase
@@ -252,15 +263,9 @@ export default function InvoicesScreen() {
   }, []);
 
   useEffect(() => {
-    fetchInvoices();
     fetchClients();
     fetchProjects();
-  }, [fetchInvoices, fetchClients, fetchProjects]);
-
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchInvoices();
-  }, [fetchInvoices]);
+  }, [fetchClients, fetchProjects]);
 
   // ─── Compute display status (auto-detect overdue) ──────
   const getDisplayStatus = useCallback((invoice: InvoiceRow): InvoiceStatus => {
@@ -275,7 +280,7 @@ export default function InvoicesScreen() {
   // ─── Filter & sort ─────────────────────────────────────
   const filteredInvoices = useMemo(() => {
     const query = searchQuery.toLowerCase();
-    let result = invoices.filter((inv) => {
+    let result = (invoices ?? []).filter((inv) => {
       const displayStatus = getDisplayStatus(inv);
       const matchesSearch =
         inv.invoice_number.toLowerCase().includes(query) ||
@@ -312,7 +317,7 @@ export default function InvoicesScreen() {
     return result;
   }, [invoices, searchQuery, filterStatus, sortBy, getDisplayStatus]);
 
-  // ─── Stats ─────────────────────────────────────────────
+  // ─── Stats (current month only) ────────────────────────
   const stats = useMemo(() => {
     let total = 0;
     let paid = 0;
@@ -322,7 +327,14 @@ export default function InvoicesScreen() {
     let paidCount = 0;
     let overdueCount = 0;
 
-    invoices.forEach((inv) => {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+    (invoices ?? []).forEach((inv) => {
+      const issueDate = inv.issue_date ? new Date(inv.issue_date) : null;
+      if (!issueDate || issueDate < monthStart || issueDate >= monthEnd) return;
+
       const displayStatus = getDisplayStatus(inv);
       total += inv.total;
       if (displayStatus === 'paid') {
@@ -343,11 +355,12 @@ export default function InvoicesScreen() {
   const activeSortCount = useMemo(() => sortBy !== 'newest' ? 1 : 0, [sortBy]);
 
   // ─── Formatting ────────────────────────────────────────
-  const formatCurrency = useCallback((amount: number) => {
+  const formatCurrency = useCallback((amount: number, decimals = true) => {
     return new Intl.NumberFormat(locale === 'es' ? 'es-MX' : 'en-US', {
       style: 'currency',
       currency: 'USD',
-      minimumFractionDigits: 2,
+      minimumFractionDigits: decimals ? 2 : 0,
+      maximumFractionDigits: decimals ? 2 : 0,
     }).format(amount);
   }, [locale]);
 
@@ -466,6 +479,16 @@ export default function InvoicesScreen() {
     }
   }, [create]);
 
+  useEffect(() => {
+    if (openInvoiceId && !loading && (invoices ?? []).length > 0) {
+      const invoice = (invoices ?? []).find(inv => inv.id === openInvoiceId);
+      if (invoice) {
+        openViewModal(invoice);
+      }
+      router.setParams({ id: '' });
+    }
+  }, [openInvoiceId, loading, invoices]);
+
   const openViewModal = async (invoice: InvoiceRow) => {
     haptics.selection();
     setSelectedInvoice(invoice);
@@ -563,7 +586,7 @@ export default function InvoicesScreen() {
 
       setShowAddModal(false);
       resetForm();
-      fetchInvoices();
+      refresh();
       haptics.notification(NotificationFeedbackType.Success);
       showToast('success', t('invoices.invoiceCreated'));
     } catch (error: any) {
@@ -584,9 +607,10 @@ export default function InvoicesScreen() {
       const taxAmount = calculateTaxAmount();
       const total = subtotal + taxAmount;
 
-      const { error: invoiceError } = await supabase
-        .from('invoices')
-        .update({
+      const { error: invoiceError } = await mutate({
+        table: 'invoices',
+        operation: 'update',
+        data: {
           invoice_number: formInvoiceNumber.trim(),
           client_id: formClientId,
           project_id: formProjectId || null,
@@ -599,8 +623,10 @@ export default function InvoicesScreen() {
           tax_rate: taxRate,
           tax_amount: taxAmount,
           total,
-        } as any)
-        .eq('id', selectedInvoice.id);
+        },
+        matchValue: selectedInvoice.id,
+        cacheKeys: ['invoices'],
+      });
 
       if (invoiceError) throw invoiceError;
 
@@ -631,7 +657,7 @@ export default function InvoicesScreen() {
       setShowEditModal(false);
       setSelectedInvoice(null);
       resetForm();
-      fetchInvoices();
+      refresh();
       haptics.notification(NotificationFeedbackType.Success);
       showToast('success', t('invoices.invoiceUpdated'));
     } catch (error: any) {
@@ -656,10 +682,12 @@ export default function InvoicesScreen() {
         .delete()
         .eq('invoice_id', invoiceToDelete.id);
 
-      const { error } = await supabase
-        .from('invoices')
-        .delete()
-        .eq('id', invoiceToDelete.id);
+      const { error } = await mutate({
+        table: 'invoices',
+        operation: 'delete',
+        matchValue: invoiceToDelete.id,
+        cacheKeys: ['invoices'],
+      });
 
       if (error) throw error;
 
@@ -668,7 +696,7 @@ export default function InvoicesScreen() {
       setShowViewModal(false);
       setSelectedInvoice(null);
       setInvoiceToDelete(null);
-      fetchInvoices();
+      refresh();
       showToast('success', t('invoices.invoiceDeleted'));
     } catch (error: any) {
       secureLog.error('Error deleting invoice:', error);
@@ -679,51 +707,51 @@ export default function InvoicesScreen() {
   const handleMarkSent = async (invoice: InvoiceRow) => {
     haptics.impact();
     try {
-      const { error } = await supabase
-        .from('invoices')
-        .update({ status: 'sent' } as any)
-        .eq('id', invoice.id)
-        .eq('user_id', user?.id || '');
+      const { error } = await mutate({
+        table: 'invoices',
+        operation: 'update',
+        data: { status: 'sent' },
+        matchValue: invoice.id,
+        cacheKeys: ['invoices'],
+      });
 
       if (error) throw error;
 
-      setInvoices(prev =>
-        prev.map(inv => inv.id === invoice.id ? { ...inv, status: 'sent' as InvoiceStatus } : inv)
-      );
       if (selectedInvoice?.id === invoice.id) {
         setSelectedInvoice(prev => prev ? { ...prev, status: 'sent' as InvoiceStatus } : null);
       }
+      refresh();
       showToast('success', t('invoices.markedSent'));
     } catch (error) {
       secureLog.error('Error marking sent:', error);
       showToast('error', t('invoices.loadError'));
-      fetchInvoices();
+      refresh();
     }
   };
 
   const handleMarkPaid = async (invoice: InvoiceRow) => {
     haptics.impact();
     try {
-      const { error } = await supabase
-        .from('invoices')
-        .update({ status: 'paid' } as any)
-        .eq('id', invoice.id)
-        .eq('user_id', user?.id || '');
+      const { error } = await mutate({
+        table: 'invoices',
+        operation: 'update',
+        data: { status: 'paid' },
+        matchValue: invoice.id,
+        cacheKeys: ['invoices'],
+      });
 
       if (error) throw error;
 
-      setInvoices(prev =>
-        prev.map(inv => inv.id === invoice.id ? { ...inv, status: 'paid' as InvoiceStatus } : inv)
-      );
       if (selectedInvoice?.id === invoice.id) {
         setSelectedInvoice(prev => prev ? { ...prev, status: 'paid' as InvoiceStatus } : null);
       }
       haptics.notification(NotificationFeedbackType.Success);
+      refresh();
       showToast('success', t('invoices.markedPaid'));
     } catch (error) {
       secureLog.error('Error marking paid:', error);
       showToast('error', t('invoices.loadError'));
-      fetchInvoices();
+      refresh();
     }
   };
 
@@ -745,13 +773,11 @@ export default function InvoicesScreen() {
         });
 
         if (response.ok) {
-          setInvoices(prev =>
-            prev.map(inv => inv.id === invoice.id ? { ...inv, status: 'sent' as InvoiceStatus } : inv)
-          );
           if (selectedInvoice?.id === invoice.id) {
             setSelectedInvoice(prev => prev ? { ...prev, status: 'sent' as InvoiceStatus } : null);
           }
           haptics.notification(NotificationFeedbackType.Success);
+          refresh();
           showToast('success', t('invoices.invoiceSent'));
           return;
         }
@@ -766,18 +792,18 @@ export default function InvoicesScreen() {
         await Linking.openURL(`mailto:${clientEmail}?subject=${subject}&body=${body}`);
 
         // Mark as sent after composing email
-        await supabase
-          .from('invoices')
-          .update({ status: 'sent' } as any)
-          .eq('id', invoice.id)
-          .eq('user_id', user?.id || '');
+        await mutate({
+          table: 'invoices',
+          operation: 'update',
+          data: { status: 'sent' },
+          matchValue: invoice.id,
+          cacheKeys: ['invoices'],
+        });
 
-        setInvoices(prev =>
-          prev.map(inv => inv.id === invoice.id ? { ...inv, status: 'sent' as InvoiceStatus } : inv)
-        );
         if (selectedInvoice?.id === invoice.id) {
           setSelectedInvoice(prev => prev ? { ...prev, status: 'sent' as InvoiceStatus } : null);
         }
+        refresh();
         showToast('success', t('invoices.markedSent'));
       } else {
         showToast('error', t('invoices.noClientEmail'));
@@ -791,39 +817,173 @@ export default function InvoicesScreen() {
   const handleDownloadPdf = async (invoice: InvoiceRow) => {
     haptics.impact();
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      // Fetch line items for this invoice
+      const items = viewLineItems.length > 0 && selectedInvoice?.id === invoice.id
+        ? viewLineItems
+        : await fetchInvoiceItems(invoice.id);
 
-      if (session) {
-        // Try fetching PDF with auth header
-        const response = await fetch(`${ENV.APP_URL}/api/invoices/${invoice.id}/download`, {
-          headers: { 'Authorization': `Bearer ${session.access_token}` },
-        });
+      const clientName = (invoice.client as any)?.name || t('invoices.noClient');
+      const clientEmail = (invoice.client as any)?.email || '';
+      const clientCompany = (invoice.client as any)?.company || '';
+      const projectName = (invoice.project as any)?.name || '';
+      const localeStr = locale === 'es' ? 'es-MX' : 'en-US';
 
-        if (response.ok) {
-          // Got PDF — open the URL with token in cookie-compatible way
-          const blob = await response.blob();
-          // On mobile, share the invoice page instead since we can't save blobs easily
-          const url = `${ENV.APP_URL}/invoices`;
-          await Linking.openURL(url);
-          return;
+      const fmtCurrency = (amount: number) =>
+        new Intl.NumberFormat(localeStr, { style: 'currency', currency: 'USD' }).format(amount);
+
+      const fmtDate = (dateStr: string) =>
+        new Date(dateStr).toLocaleDateString(localeStr, { year: 'numeric', month: 'long', day: 'numeric' });
+
+      const lineItemsHtml = items.map(item => `
+        <tr>
+          <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;">${item.description}</td>
+          <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;text-align:center;">${item.quantity}</td>
+          <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(item.unit_price)}</td>
+          <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;text-align:right;">${fmtCurrency(item.amount)}</td>
+        </tr>
+      `).join('');
+
+      const html = `
+        <html>
+        <head>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 40px; color: #1f2937; }
+            .header { display: flex; justify-content: space-between; margin-bottom: 40px; }
+            .invoice-title { font-size: 28px; font-weight: 700; color: #0B3D91; }
+            .invoice-number { font-size: 14px; color: #6b7280; margin-top: 4px; }
+            .meta-row { display: flex; justify-content: space-between; margin-bottom: 30px; }
+            .meta-block { }
+            .meta-label { font-size: 11px; text-transform: uppercase; color: #9ca3af; letter-spacing: 0.5px; margin-bottom: 4px; }
+            .meta-value { font-size: 14px; font-weight: 500; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+            th { padding: 10px 12px; text-align: left; font-size: 11px; text-transform: uppercase; color: #6b7280; letter-spacing: 0.5px; border-bottom: 2px solid #e5e7eb; }
+            th:nth-child(2) { text-align: center; }
+            th:nth-child(3), th:nth-child(4) { text-align: right; }
+            .totals { margin-left: auto; width: 250px; }
+            .total-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px; }
+            .total-row.grand { border-top: 2px solid #0B3D91; padding-top: 10px; margin-top: 6px; font-weight: 700; font-size: 18px; color: #0B3D91; }
+            .notes { margin-top: 30px; padding: 16px; background: #f9fafb; border-radius: 8px; font-size: 13px; color: #6b7280; }
+            .footer { margin-top: 40px; text-align: center; font-size: 11px; color: #9ca3af; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <div class="invoice-title">${t('invoices.invoice')}</div>
+              <div class="invoice-number">${invoice.invoice_number}</div>
+            </div>
+            <div style="text-align:right;">
+              <div class="meta-label">${t('invoices.status')}</div>
+              <div class="meta-value">${invoice.status.toUpperCase()}</div>
+            </div>
+          </div>
+
+          <div class="meta-row">
+            <div class="meta-block">
+              <div class="meta-label">${t('invoices.client')}</div>
+              <div class="meta-value">${clientName}</div>
+              ${clientCompany ? `<div style="font-size:13px;color:#6b7280;">${clientCompany}</div>` : ''}
+              ${clientEmail ? `<div style="font-size:13px;color:#6b7280;">${clientEmail}</div>` : ''}
+            </div>
+            <div class="meta-block" style="text-align:right;">
+              <div class="meta-label">${t('invoices.issueDate')}</div>
+              <div class="meta-value">${fmtDate(invoice.issue_date)}</div>
+              ${invoice.due_date ? `
+                <div class="meta-label" style="margin-top:10px;">${t('invoices.dueDate')}</div>
+                <div class="meta-value">${fmtDate(invoice.due_date)}</div>
+              ` : ''}
+            </div>
+          </div>
+
+          ${projectName ? `
+            <div style="margin-bottom:20px;">
+              <span class="meta-label">${t('invoices.project')}: </span>
+              <span class="meta-value">${projectName}</span>
+            </div>
+          ` : ''}
+
+          <table>
+            <thead>
+              <tr>
+                <th>${t('invoices.description')}</th>
+                <th>${t('invoices.qty')}</th>
+                <th>${t('invoices.unitPrice')}</th>
+                <th>${t('invoices.amount')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${lineItemsHtml || `
+                <tr>
+                  <td colspan="4" style="padding:16px;text-align:center;color:#9ca3af;">
+                    ${t('invoices.noLineItems')}
+                  </td>
+                </tr>
+              `}
+            </tbody>
+          </table>
+
+          <div class="totals">
+            <div class="total-row">
+              <span>${t('invoices.subtotal')}</span>
+              <span>${fmtCurrency(invoice.subtotal)}</span>
+            </div>
+            ${invoice.tax_rate > 0 ? `
+              <div class="total-row">
+                <span>${t('invoices.tax')} (${invoice.tax_rate}%)</span>
+                <span>${fmtCurrency(invoice.tax_amount)}</span>
+              </div>
+            ` : ''}
+            <div class="total-row grand">
+              <span>${t('invoices.total')}</span>
+              <span>${fmtCurrency(invoice.total)}</span>
+            </div>
+          </div>
+
+          ${invoice.notes ? `
+            <div class="notes">
+              <strong>${t('invoices.notes')}:</strong> ${invoice.notes}
+            </div>
+          ` : ''}
+
+          ${invoice.payment_terms ? `
+            <div class="notes">
+              <strong>${t('invoices.paymentTerms')}:</strong> ${invoice.payment_terms}
+            </div>
+          ` : ''}
+
+          <div class="footer">
+            ${t('invoices.generatedBy')} TaskLine
+          </div>
+        </body>
+        </html>
+      `;
+
+      if (Platform.OS === 'web') {
+        // On web, use Print.printAsync to open browser print dialog
+        await Print.printAsync({ html });
+      } else {
+        // On native, generate PDF file and share
+        const { uri } = await Print.printToFileAsync({ html });
+        const isAvailable = await Sharing.isAvailableAsync();
+        if (isAvailable) {
+          await Sharing.shareAsync(uri, {
+            mimeType: 'application/pdf',
+            dialogTitle: `${invoice.invoice_number}.pdf`,
+            UTI: 'com.adobe.pdf',
+          });
+        } else {
+          showToast('info', t('invoices.pdfSaved'));
         }
       }
-
-      // Fallback: open the website invoices page
-      await Linking.openURL(`${ENV.APP_URL}/invoices`);
     } catch (error: any) {
-      secureLog.error('Error downloading PDF:', error);
-      // Last resort: open website
-      try {
-        await Linking.openURL(`${ENV.APP_URL}/invoices`);
-      } catch {
-        showToast('error', t('invoices.downloadError'));
-      }
+      secureLog.error('Error generating PDF:', error);
+      showToast('error', t('invoices.downloadError'));
     }
   };
 
   // ─── Render invoice card ──────────────────────────────
-  const renderInvoice = ({ item }: { item: InvoiceRow }) => {
+  const renderInvoice = useCallback(({ item }: { item: InvoiceRow }) => {
     const displayStatus = getDisplayStatus(item);
     const config = statusConfig[displayStatus] || statusConfig.draft;
 
@@ -903,7 +1063,7 @@ export default function InvoicesScreen() {
         )}
       </TouchableOpacity>
     );
-  };
+  }, [colors, t, getDisplayStatus, statusConfig, formatDate, formatCurrency, openViewModal, handleMarkSent, handleMarkPaid]);
 
   // ─── Line items form (shared between add & edit) ──────
   const renderLineItemsForm = () => (
@@ -1003,6 +1163,7 @@ export default function InvoicesScreen() {
         onChange={setFormClientId}
         placeholder={t('invoices.selectClient')}
         error={formErrors.client}
+        searchable
       />
 
       <Select
@@ -1011,6 +1172,7 @@ export default function InvoicesScreen() {
         value={formProjectId}
         onChange={setFormProjectId}
         placeholder={t('invoices.selectProject')}
+        searchable
       />
 
       <Select
@@ -1102,93 +1264,100 @@ export default function InvoicesScreen() {
       <View style={styles.summaryContainer}>
         <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.summaryLabel, { color: colors.textTertiary }]}>{t('invoices.totalInvoiced')}</Text>
-          <Text style={[styles.summaryValue, { color: colors.text }]}>{formatCurrency(stats.total)}</Text>
+          <Text style={[styles.summaryValue, { color: colors.text }]}>{formatCurrency(stats.total, false)}</Text>
         </View>
         <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.summaryLabel, { color: colors.textTertiary }]}>{t('invoices.totalPaid')}</Text>
-          <Text style={[styles.summaryValue, { color: colors.success }]}>{formatCurrency(stats.paid)}</Text>
+          <Text style={[styles.summaryValue, { color: colors.success }]}>{formatCurrency(stats.paid, false)}</Text>
         </View>
         <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.summaryLabel, { color: colors.textTertiary }]}>{t('invoices.outstanding')}</Text>
           <Text style={[styles.summaryValue, { color: stats.outstanding > 0 ? colors.warning : colors.textSecondary }]}>
-            {formatCurrency(stats.outstanding)}
+            {formatCurrency(stats.outstanding, false)}
           </Text>
         </View>
       </View>
 
-      {/* Search + Sort */}
-      <View style={styles.searchRow}>
-        <View style={{ flex: 1 }}>
-          <SearchBar
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholder={t('invoices.searchPlaceholder')}
-          />
-        </View>
-        <TouchableOpacity
-          style={[styles.sortButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-          onPress={() => setShowSortModal(true)}
-        >
-          <Ionicons name="funnel-outline" size={18} color={colors.textSecondary} />
-          {activeSortCount > 0 && (
-            <View style={[styles.sortBadge, { backgroundColor: colors.primary }]}>
-              <Text style={styles.sortBadgeText}>{activeSortCount}</Text>
+      {/* Search + Sort + Status Tabs + Invoice List */}
+      <View style={{ flex: 1, overflow: 'hidden' }}>
+        <Animated.View style={[filterContainerStyle, { backgroundColor: colors.background }]} onLayout={onFilterLayout}>
+          <View style={styles.searchRow}>
+            <View style={{ flex: 1 }}>
+              <SearchBar
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder={t('invoices.searchPlaceholder')}
+              />
             </View>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      {/* Status Tabs */}
-      <View style={[styles.tabBar, { borderBottomColor: colors.borderLight }]}>
-        {statusFilterOptions.map((option) => {
-          const isActive = filterStatus === option.key;
-          return (
             <TouchableOpacity
-              key={option.key}
-              style={[styles.tab, isActive && { borderBottomColor: colors.primary }]}
-              onPress={() => setFilterStatus(option.key)}
+              style={[styles.sortButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              onPress={() => setShowSortModal(true)}
             >
-              <Text
-                style={[
-                  styles.tabText,
-                  { color: colors.textTertiary },
-                  isActive && { color: colors.primary, fontWeight: '600' },
-                ]}
-              >
-                {option.label}
-              </Text>
+              <Ionicons name="funnel-outline" size={18} color={colors.textSecondary} />
+              {activeSortCount > 0 && (
+                <View style={[styles.sortBadge, { backgroundColor: colors.primary }]}>
+                  <Text style={styles.sortBadgeText}>{activeSortCount}</Text>
+                </View>
+              )}
             </TouchableOpacity>
-          );
-        })}
-      </View>
+          </View>
+          <View style={[styles.tabBar, { borderBottomColor: colors.borderLight }]}>
+            {statusFilterOptions.map((option) => {
+              const isActive = filterStatus === option.key;
+              return (
+                <TouchableOpacity
+                  key={option.key}
+                  style={[styles.tab, isActive && { borderBottomColor: colors.primary }]}
+                  onPress={() => setFilterStatus(option.key)}
+                >
+                  <Text
+                    style={[
+                      styles.tabText,
+                      { color: colors.textTertiary },
+                      isActive && { color: colors.primary, fontWeight: '600' },
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </Animated.View>
 
-      {/* Invoice List */}
-      <FlatList
-        data={filteredInvoices}
-        renderItem={renderInvoice}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        ListEmptyComponent={
-          searchQuery || filterStatus !== 'all' ? (
-            <EmptyState
-              icon="search-outline"
-              title={t('invoices.noResults')}
-              description={t('invoices.tryDifferentSearch')}
-            />
-          ) : (
-            <EmptyState
-              icon="document-text-outline"
-              title={t('invoices.noInvoices')}
-              description={t('invoices.noInvoicesDesc')}
-              actionLabel={t('invoices.addInvoice')}
-              onAction={openAddModal}
-            />
-          )
-        }
-      />
+        <Animated.FlatList
+          data={filteredInvoices}
+          renderItem={renderInvoice}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={[styles.listContent, { paddingTop: filterHeight }]}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+          removeClippedSubviews
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          initialNumToRender={10}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={refresh} />
+          }
+          ListEmptyComponent={
+            searchQuery || filterStatus !== 'all' ? (
+              <EmptyState
+                icon="search-outline"
+                title={t('invoices.noResults')}
+                description={t('invoices.tryDifferentSearch')}
+              />
+            ) : (
+              <EmptyState
+                icon="document-text-outline"
+                title={t('invoices.noInvoices')}
+                description={t('invoices.noInvoicesDesc')}
+                actionLabel={t('invoices.addInvoice')}
+                onAction={openAddModal}
+              />
+            )
+          }
+        />
+      </View>
 
       {/* ─── View Invoice Modal ────────────────────────── */}
       <Modal
@@ -1217,11 +1386,25 @@ export default function InvoicesScreen() {
             </View>
 
             {/* Bill To */}
-            <View style={[styles.viewSection, { backgroundColor: colors.surfaceSecondary }]}>
+            <TouchableOpacity
+              style={[styles.viewSection, { backgroundColor: colors.surfaceSecondary }]}
+              onPress={() => {
+                if (selectedInvoice.client_id) {
+                  setShowViewModal(false);
+                  router.push({ pathname: '/(app)/client-detail', params: { id: selectedInvoice.client_id } } as any);
+                }
+              }}
+              activeOpacity={selectedInvoice.client_id ? 0.7 : 1}
+            >
               <Text style={[styles.viewSectionLabel, { color: colors.textTertiary }]}>{t('invoices.billTo')}</Text>
-              <Text style={[styles.viewSectionValue, { color: colors.text }]}>
-                {(selectedInvoice.client as any)?.name || t('invoices.noClient')}
-              </Text>
+              <View style={styles.viewClickableRow}>
+                <Text style={[styles.viewSectionValue, { color: selectedInvoice.client_id ? colors.primary : colors.text }]}>
+                  {(selectedInvoice.client as any)?.name || t('invoices.noClient')}
+                </Text>
+                {selectedInvoice.client_id && (
+                  <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+                )}
+              </View>
               {(selectedInvoice.client as any)?.company && (
                 <Text style={[styles.viewSectionSub, { color: colors.textSecondary }]}>
                   {(selectedInvoice.client as any).company}
@@ -1232,7 +1415,7 @@ export default function InvoicesScreen() {
                   {(selectedInvoice.client as any).email}
                 </Text>
               )}
-            </View>
+            </TouchableOpacity>
 
             {/* Invoice Details */}
             <View style={[styles.viewSection, { backgroundColor: colors.surfaceSecondary }]}>
@@ -1258,10 +1441,22 @@ export default function InvoicesScreen() {
                 </View>
               )}
               {selectedInvoice.project && (
-                <View style={styles.viewDetailRow}>
+                <TouchableOpacity
+                  style={styles.viewDetailRow}
+                  onPress={() => {
+                    if (selectedInvoice.project_id) {
+                      setShowViewModal(false);
+                      router.push({ pathname: '/(app)/project-detail', params: { id: selectedInvoice.project_id } } as any);
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
                   <Text style={[styles.viewDetailLabel, { color: colors.textSecondary }]}>{t('invoices.project')}</Text>
-                  <Text style={[styles.viewDetailValue, { color: colors.text }]}>{(selectedInvoice.project as any)?.name}</Text>
-                </View>
+                  <View style={styles.viewClickableRow}>
+                    <Text style={[styles.viewDetailValue, { color: colors.primary }]}>{(selectedInvoice.project as any)?.name}</Text>
+                    <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+                  </View>
+                </TouchableOpacity>
               )}
             </View>
 
@@ -1789,6 +1984,11 @@ const styles = StyleSheet.create({
   viewSectionValue: {
     fontSize: FontSizes.md,
     fontWeight: '600',
+  },
+  viewClickableRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
   },
   viewSectionSub: {
     fontSize: FontSizes.sm,

@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   Dimensions,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -15,8 +16,11 @@ import { NotificationFeedbackType } from 'expo-haptics';
 import { supabase } from '@/lib/supabase';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
+import { useCollapsibleFilters } from '@/hooks/useCollapsibleFilters';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
+import { useOfflineData } from '@/hooks/useOfflineData';
+import { useOfflineMutation } from '@/hooks/useOfflineMutation';
 import {
   Modal, Input, Button, Select, DatePicker, EmptyState,
   SearchBar, FilterChips, ListSkeleton, ConfirmDialog,
@@ -36,15 +40,27 @@ const COLUMN_WIDTH = screenWidth * 0.78;
 
 export default function TasksScreen() {
   const router = useRouter();
-  const { create } = useLocalSearchParams<{ create?: string }>();
+  const { create, id: openTaskId } = useLocalSearchParams<{ create?: string; id?: string }>();
   const { user } = useAuthStore();
   const { colors } = useTheme();
   const { t, locale } = useTranslations();
   const haptics = useHaptics();
+  const { filterContainerStyle, onFilterLayout, onScroll, filterHeight } = useCollapsibleFilters();
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [tasks, setTasks] = useState<TaskWithProject[]>([]);
+  const { data: tasks, loading, refreshing, refresh } = useOfflineData<TaskWithProject[]>(
+    'tasks',
+    async () => {
+      const { data, error } = await supabase
+        .from('tasks')
+        .select('*, project:projects(id, name, client:clients(name))')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return (data || []) as any;
+    },
+    { deps: [t] },
+  );
+  const { mutate } = useOfflineMutation();
   const [projects, setProjects] = useState<Project[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [searchQuery, setSearchQuery] = useState('');
@@ -73,6 +89,11 @@ export default function TasksScreen() {
   // Delete confirm state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [taskToDelete, setTaskToDelete] = useState<TaskWithProject | null>(null);
+
+  // Archive state
+  const [archivedExpanded, setArchivedExpanded] = useState(false);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [showDeleteArchivedConfirm, setShowDeleteArchivedConfirm] = useState(false);
 
   // i18n-safe status config
   const statusConfig = useMemo(() => ({
@@ -145,53 +166,43 @@ export default function TasksScreen() {
     { key: 'high', label: t('tasks.high') },
   ], [t]);
 
-  const fetchTasks = useCallback(async () => {
-    try {
-      const { data, error } = await supabase
-        .from('tasks')
-        .select('*, project:projects(id, name, client:clients(name))')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setTasks(data || []);
-    } catch (error) {
-      secureLog.error('Error fetching tasks:', error);
-      showToast('error', t('tasks.loadError'));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [t]);
-
   const fetchProjects = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('projects')
-        .select('*')
+        .select('*, client:clients(name)')
         .eq('status', 'active')
         .order('name');
 
       if (error) throw error;
-      setProjects((data as Project[]) ?? []);
+      setProjects((data as any[]) ?? []);
     } catch (error) {
       secureLog.error('Error fetching projects:', error);
     }
   }, []);
 
   useEffect(() => {
-    fetchTasks();
     fetchProjects();
-  }, [fetchTasks, fetchProjects]);
+  }, [fetchProjects]);
 
   const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchTasks();
-  }, [fetchTasks]);
+    refresh();
+  }, [refresh]);
+
+  // Separate active vs archived tasks
+  const activeTasks = useMemo(() =>
+    (tasks ?? []).filter((t) => !(t as any).archived_at),
+    [tasks]
+  );
+  const archivedTasks = useMemo(() =>
+    (tasks ?? []).filter((t) => !!(t as any).archived_at),
+    [tasks]
+  );
 
   // Filter and sort
   const filteredTasks = useMemo(() => {
     const query = searchQuery.toLowerCase();
-    let result = tasks.filter((task) => {
+    let result = activeTasks.filter((task) => {
       const matchesSearch =
         task.title.toLowerCase().includes(query) ||
         (task.description?.toLowerCase().includes(query) ?? false) ||
@@ -233,12 +244,12 @@ export default function TasksScreen() {
 
   // Stats (cast to any for status values not in outdated generated types)
   const stats = useMemo(() => ({
-    total: tasks.length,
-    pending: tasks.filter((t) => (t.status as string) === 'pending').length,
-    inProgress: tasks.filter((t) => (t.status as string) === 'in_progress').length,
-    completed: tasks.filter((t) => (t.status as string) === 'completed').length,
-    backlog: tasks.filter((t) => (t.status as string) === 'backlog').length,
-  }), [tasks]);
+    total: activeTasks.length,
+    pending: activeTasks.filter((t) => (t.status as string) === 'pending').length,
+    inProgress: activeTasks.filter((t) => (t.status as string) === 'in_progress').length,
+    completed: activeTasks.filter((t) => (t.status as string) === 'completed').length,
+    backlog: activeTasks.filter((t) => (t.status as string) === 'backlog').length,
+  }), [activeTasks]);
 
   // Active filter count for badge
   const activeFilterCount = useMemo(() => {
@@ -274,12 +285,17 @@ export default function TasksScreen() {
         due_date: formData.due_date?.toISOString() || null,
       };
 
-      const { error } = await supabase.from('tasks').insert(newTask);
+      const { error } = await mutate({
+        table: 'tasks',
+        operation: 'insert',
+        data: newTask,
+        cacheKeys: ['tasks'],
+      });
       if (error) throw error;
 
       setShowAddModal(false);
       resetForm();
-      fetchTasks();
+      refresh();
       haptics.notification(NotificationFeedbackType.Success);
       showToast('success', t('tasks.taskAdded'));
     } catch (error: any) {
@@ -295,24 +311,27 @@ export default function TasksScreen() {
 
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from('tasks')
-        .update({
+      const { error } = await mutate({
+        table: 'tasks',
+        operation: 'update',
+        data: {
           project_id: formData.project_id,
           title: formData.title.trim(),
           description: formData.description.trim() || null,
           status: formData.status,
           priority: formData.priority,
           due_date: formData.due_date?.toISOString() || null,
-        } as any)
-        .eq('id', selectedTask.id);
+        },
+        matchValue: selectedTask.id,
+        cacheKeys: ['tasks'],
+      });
 
       if (error) throw error;
 
       setShowEditModal(false);
       setSelectedTask(null);
       resetForm();
-      fetchTasks();
+      refresh();
       haptics.notification(NotificationFeedbackType.Success);
       showToast('success', t('tasks.taskUpdated'));
     } catch (error: any) {
@@ -331,10 +350,12 @@ export default function TasksScreen() {
   const handleDeleteTask = async () => {
     if (!taskToDelete) return;
     try {
-      const { error } = await supabase
-        .from('tasks')
-        .delete()
-        .eq('id', taskToDelete.id);
+      const { error } = await mutate({
+        table: 'tasks',
+        operation: 'delete',
+        matchValue: taskToDelete.id,
+        cacheKeys: ['tasks'],
+      });
 
       if (error) throw error;
 
@@ -343,10 +364,84 @@ export default function TasksScreen() {
       setShowViewModal(false);
       setSelectedTask(null);
       setTaskToDelete(null);
-      fetchTasks();
+      refresh();
       showToast('success', t('tasks.taskDeleted'));
     } catch (error: any) {
       secureLog.error('Error deleting task:', error);
+      showToast('error', error.message || t('tasks.loadError'));
+    }
+  };
+
+  // ─── Archive Functions ──────────────────────────────────
+  const archiveTask = async (task: TaskWithProject) => {
+    haptics.impact();
+    try {
+      const { error } = await (supabase.from('tasks') as any)
+        .update({ archived_at: new Date().toISOString() })
+        .eq('id', task.id)
+        .eq('user_id', user?.id);
+      if (error) throw error;
+      refresh();
+      showToast('success', t('tasks.taskArchived'));
+    } catch (error: any) {
+      secureLog.error('Error archiving task:', error);
+      showToast('error', error.message || t('tasks.loadError'));
+    }
+  };
+
+  const unarchiveTask = async (task: TaskWithProject) => {
+    haptics.impact();
+    try {
+      const { error } = await (supabase.from('tasks') as any)
+        .update({ archived_at: null })
+        .eq('id', task.id)
+        .eq('user_id', user?.id);
+      if (error) throw error;
+      refresh();
+      showToast('success', t('tasks.taskUnarchived'));
+    } catch (error: any) {
+      secureLog.error('Error unarchiving task:', error);
+      showToast('error', error.message || t('tasks.loadError'));
+    }
+  };
+
+  const massArchiveCompleted = async () => {
+    setShowArchiveConfirm(false);
+    haptics.impact();
+    try {
+      const completedTasks = activeTasks.filter((t) => (t.status as string) === 'completed');
+      if (completedTasks.length === 0) return;
+      const ids = completedTasks.map((t) => t.id);
+      const { error } = await (supabase.from('tasks') as any)
+        .update({ archived_at: new Date().toISOString() })
+        .in('id', ids)
+        .eq('user_id', user?.id);
+      if (error) throw error;
+      refresh();
+      showToast('success', t('tasks.tasksArchived', { count: String(ids.length) }));
+    } catch (error: any) {
+      secureLog.error('Error mass archiving:', error);
+      showToast('error', error.message || t('tasks.loadError'));
+    }
+  };
+
+  const massDeleteArchived = async () => {
+    setShowDeleteArchivedConfirm(false);
+    if (!user?.id) return;
+    haptics.impact();
+    try {
+      if (archivedTasks.length === 0) return;
+      const ids = archivedTasks.map((t) => t.id);
+      const { error } = await supabase
+        .from('tasks')
+        .delete()
+        .in('id', ids)
+        .eq('user_id', user.id);
+      if (error) throw error;
+      refresh();
+      showToast('success', t('tasks.archivedDeleted'));
+    } catch (error: any) {
+      secureLog.error('Error deleting archived:', error);
       showToast('error', error.message || t('tasks.loadError'));
     }
   };
@@ -374,6 +469,16 @@ export default function TasksScreen() {
       router.setParams({ create: '' });
     }
   }, [create]);
+
+  useEffect(() => {
+    if (openTaskId && !loading && (tasks ?? []).length > 0) {
+      const task = (tasks ?? []).find(t => t.id === openTaskId);
+      if (task) {
+        openViewModal(task);
+      }
+      router.setParams({ id: '' });
+    }
+  }, [openTaskId, loading, tasks]);
 
   // View modal — read-only task details
   const openViewModal = (task: TaskWithProject) => {
@@ -405,19 +510,18 @@ export default function TasksScreen() {
   const updateTaskStatus = async (taskId: string, newStatus: TaskStatus) => {
     haptics.impact();
     try {
-      const { error } = await supabase
-        .from('tasks')
-        .update({ status: newStatus } as any)
-        .eq('id', taskId);
+      const { error } = await mutate({
+        table: 'tasks',
+        operation: 'update',
+        data: { status: newStatus },
+        matchValue: taskId,
+        cacheKeys: ['tasks'],
+      });
 
       if (error) throw error;
 
-      // Update local state optimistically (cast needed: generated types are outdated)
-      setTasks((prev) =>
-        prev.map((task) =>
-          task.id === taskId ? { ...task, status: newStatus } as any : task
-        )
-      );
+      // Refresh to get updated data
+      refresh();
 
       // Also update selected task if viewing it
       if (selectedTask?.id === taskId) {
@@ -427,7 +531,7 @@ export default function TasksScreen() {
       secureLog.error('Error updating task status:', error);
       showToast('error', t('tasks.loadError'));
       // Revert on error
-      fetchTasks();
+      refresh();
     }
   };
 
@@ -452,7 +556,10 @@ export default function TasksScreen() {
   }, []);
 
   const projectOptions = useMemo(() =>
-    projects.map((p) => ({ key: p.id, label: p.name })),
+    projects.map((p) => {
+      const clientName = (p as any).client?.name;
+      return { key: p.id, label: clientName ? `${p.name} (${clientName})` : p.name };
+    }),
     [projects]
   );
 
@@ -526,6 +633,18 @@ export default function TasksScreen() {
             </Text>
           </TouchableOpacity>
         ))}
+        {task.status === 'completed' && (
+          <TouchableOpacity
+            style={[styles.statusButton, { backgroundColor: colors.surfaceSecondary }]}
+            onPress={() => archiveTask(task)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="archive-outline" size={14} color={colors.textTertiary} />
+            <Text style={[styles.statusButtonText, { color: colors.textTertiary }]}>
+              {t('tasks.archiveTask')}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
     );
   };
@@ -703,7 +822,7 @@ export default function TasksScreen() {
           activeOpacity={0.7}
         >
           <View style={styles.backlogHandleLeft}>
-            <Ionicons name={config.icon} size={18} color={config.color} />
+            <Ionicons name={config.icon} size={22} color={config.color} />
             <Text style={[styles.backlogTitle, { color: config.color }]}>
               {t('tasks.backlogDrawer')}
             </Text>
@@ -715,7 +834,7 @@ export default function TasksScreen() {
           </View>
           <Ionicons
             name={backlogExpanded ? 'chevron-down' : 'chevron-up'}
-            size={20}
+            size={24}
             color={colors.textTertiary}
           />
         </TouchableOpacity>
@@ -870,6 +989,108 @@ export default function TasksScreen() {
     });
   };
 
+  // ─── Archived Section (collapsible, list view) ──────────
+  const renderArchivedSection = () => {
+    if (archivedTasks.length === 0 && !archivedExpanded) return null;
+
+    return (
+      <View style={{ marginTop: Spacing.lg }}>
+        {/* Archive all completed button */}
+        {stats.completed > 0 && (
+          <TouchableOpacity
+            style={[styles.archiveAllButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={() => setShowArchiveConfirm(true)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="archive-outline" size={16} color={colors.primary} />
+            <Text style={[styles.archiveAllText, { color: colors.primary }]}>
+              {t('tasks.massArchive')}
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Archived drawer */}
+        {(archivedTasks.length > 0) && (
+          <View style={[styles.archivedDrawer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <TouchableOpacity
+              style={styles.archivedHandle}
+              onPress={() => {
+                haptics.selection();
+                setArchivedExpanded(!archivedExpanded);
+              }}
+              activeOpacity={0.7}
+            >
+              <View style={styles.archivedHandleLeft}>
+                <Ionicons name="archive" size={18} color={colors.textTertiary} />
+                <Text style={[styles.archivedTitle, { color: colors.textTertiary }]}>
+                  {t('tasks.archived')}
+                </Text>
+                <View style={[styles.archivedCount, { backgroundColor: colors.surfaceSecondary }]}>
+                  <Text style={[styles.archivedCountText, { color: colors.textTertiary }]}>
+                    {archivedTasks.length}
+                  </Text>
+                </View>
+              </View>
+              <Ionicons
+                name={archivedExpanded ? 'chevron-up' : 'chevron-down'}
+                size={20}
+                color={colors.textTertiary}
+              />
+            </TouchableOpacity>
+
+            {archivedExpanded && (
+              <View style={styles.archivedContent}>
+                {/* Mass delete button */}
+                <TouchableOpacity
+                  style={[styles.massDeleteButton, { backgroundColor: colors.errorLight }]}
+                  onPress={() => setShowDeleteArchivedConfirm(true)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="trash-outline" size={14} color={colors.error} />
+                  <Text style={[styles.massDeleteText, { color: colors.error }]}>
+                    {t('tasks.deleteAllArchived')}
+                  </Text>
+                </TouchableOpacity>
+
+                {archivedTasks.map((task) => (
+                  <View
+                    key={task.id}
+                    style={[styles.archivedCard, { backgroundColor: colors.background, borderColor: colors.borderLight }]}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.archivedTaskTitle, { color: colors.textSecondary }]} numberOfLines={1}>
+                        {task.title}
+                      </Text>
+                      <Text style={[styles.archivedTaskMeta, { color: colors.textTertiary }]}>
+                        {t('tasks.archivedOn', { date: formatDate((task as any).archived_at) })}
+                        {' · '}
+                        {(task.project as any)?.name || t('tasks.noProject')}
+                      </Text>
+                    </View>
+                    <View style={styles.archivedActions}>
+                      <TouchableOpacity
+                        style={[styles.archivedActionBtn, { backgroundColor: colors.infoLight }]}
+                        onPress={() => unarchiveTask(task)}
+                      >
+                        <Ionicons name="arrow-undo-outline" size={16} color={colors.primary} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.archivedActionBtn, { backgroundColor: colors.errorLight }]}
+                        onPress={() => confirmDeleteTask(task)}
+                      >
+                        <Ionicons name="trash-outline" size={16} color={colors.error} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+      </View>
+    );
+  };
+
   // ─── View Modal (read-only) ─────────────────────────────
   const renderViewModal = () => {
     if (!selectedTask) return null;
@@ -1004,6 +1225,7 @@ export default function TasksScreen() {
         value={formData.project_id}
         onChange={(value) => setFormData({ ...formData, project_id: value })}
         error={formErrors.project_id}
+        searchable
       />
 
       <Input
@@ -1137,7 +1359,7 @@ export default function TasksScreen() {
         <View style={styles.headerLeft}>
           <Text style={[styles.title, { color: colors.text }]}>{t('tasks.title')}</Text>
           <View style={[styles.countBadge, { backgroundColor: colors.infoLight }]}>
-            <Text style={[styles.countBadgeText, { color: colors.primary }]}>{tasks.length}</Text>
+            <Text style={[styles.countBadgeText, { color: colors.primary }]}>{activeTasks.length}</Text>
           </View>
         </View>
         <View style={styles.headerActions}>
@@ -1164,73 +1386,76 @@ export default function TasksScreen() {
         </View>
       </View>
 
-      {/* Search + Filter row */}
-      <View style={styles.searchRow}>
-        <View style={styles.searchFlex}>
-          <SearchBar
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholder={t('tasks.searchPlaceholder')}
-          />
-        </View>
-        <TouchableOpacity
-          style={[styles.filterButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-          onPress={() => setShowFilterModal(true)}
-        >
-          <Ionicons name="options-outline" size={20} color={activeFilterCount > 0 ? colors.primary : colors.textSecondary} />
-          {activeFilterCount > 0 && (
-            <View style={[styles.filterBadge, { backgroundColor: colors.primary }]}>
-              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+      {/* Search + Filters + Stats + Content */}
+      <View style={{ flex: 1, overflow: 'hidden' }}>
+        <Animated.View style={[filterContainerStyle, { backgroundColor: colors.background }]} onLayout={onFilterLayout}>
+          <View style={styles.searchRow}>
+            <View style={styles.searchFlex}>
+              <SearchBar
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder={t('tasks.searchPlaceholder')}
+              />
             </View>
-          )}
-        </TouchableOpacity>
-      </View>
+            <TouchableOpacity
+              style={[styles.filterButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              onPress={() => setShowFilterModal(true)}
+            >
+              <Ionicons name="options-outline" size={20} color={activeFilterCount > 0 ? colors.primary : colors.textSecondary} />
+              {activeFilterCount > 0 && (
+                <View style={[styles.filterBadge, { backgroundColor: colors.primary }]}>
+                  <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+          <View style={styles.filterContainer}>
+            <FilterChips
+              options={statusFilterOptions}
+              selected={filterStatus}
+              onSelect={setFilterStatus}
+              scrollable
+            />
+          </View>
+          <View style={styles.statsContainer}>
+            {renderStats()}
+          </View>
+        </Animated.View>
 
-      {/* Single row: Status Filter Chips */}
-      <View style={styles.filterContainer}>
-        <FilterChips
-          options={statusFilterOptions}
-          selected={filterStatus}
-          onSelect={setFilterStatus}
-          scrollable
-        />
-      </View>
+        {/* Content */}
+        {viewMode === 'board' ? (
+          <View style={[styles.boardWrapper, { paddingTop: filterHeight }]}>
+            <ScrollView
+              horizontal
+              pagingEnabled={false}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.boardContainer}
+              style={styles.boardScroll}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+              }
+            >
+              {(['pending', 'in_progress', 'completed'] as TaskStatus[]).map(renderColumn)}
+            </ScrollView>
 
-      {/* Stats Bar */}
-      <View style={styles.statsContainer}>
-        {renderStats()}
-      </View>
-
-      {/* Content */}
-      {viewMode === 'board' ? (
-        <View style={styles.boardWrapper}>
-          <ScrollView
-            horizontal
-            pagingEnabled={false}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.boardContainer}
-            style={styles.boardScroll}
+            {/* Backlog Drawer */}
+            {renderBacklogDrawer()}
+          </View>
+        ) : (
+          <Animated.ScrollView
+            style={styles.listContainer}
+            contentContainerStyle={[styles.listContent, { paddingTop: filterHeight }]}
+            onScroll={onScroll}
+            scrollEventThrottle={16}
             refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
             }
           >
-            {(['pending', 'in_progress', 'completed'] as TaskStatus[]).map(renderColumn)}
-          </ScrollView>
-
-          {/* Backlog Drawer */}
-          {renderBacklogDrawer()}
-        </View>
-      ) : (
-        <ScrollView
-          style={styles.listContainer}
-          contentContainerStyle={styles.listContent}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-        >
-          {renderListView()}
-        </ScrollView>
-      )}
+            {renderListView()}
+            {renderArchivedSection()}
+          </Animated.ScrollView>
+        )}
+      </View>
 
       {/* View Task Modal (read-only) */}
       <Modal
@@ -1315,6 +1540,29 @@ export default function TasksScreen() {
         variant="danger"
         onConfirm={handleDeleteTask}
         onCancel={() => { setShowDeleteConfirm(false); setTaskToDelete(null); }}
+      />
+
+      {/* Archive All Completed Confirm */}
+      <ConfirmDialog
+        visible={showArchiveConfirm}
+        title={t('tasks.archiveConfirmTitle')}
+        message={t('tasks.archiveConfirmMessage')}
+        confirmLabel={t('common.confirm')}
+        cancelLabel={t('common.cancel')}
+        onConfirm={massArchiveCompleted}
+        onCancel={() => setShowArchiveConfirm(false)}
+      />
+
+      {/* Delete All Archived Confirm */}
+      <ConfirmDialog
+        visible={showDeleteArchivedConfirm}
+        title={t('tasks.deleteArchivedTitle')}
+        message={t('tasks.deleteArchivedMessage')}
+        confirmLabel={t('common.delete')}
+        cancelLabel={t('common.cancel')}
+        variant="danger"
+        onConfirm={massDeleteArchived}
+        onCancel={() => setShowDeleteArchivedConfirm(false)}
       />
     </SafeAreaView>
   );
@@ -1759,15 +2007,16 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderRadius: BorderRadius.xl,
     marginHorizontal: Spacing.lg,
-    marginBottom: Spacing.md,
+    marginBottom: Spacing['4xl'],
     overflow: 'hidden',
   },
   backlogHandle: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.lg,
+    minHeight: 56,
   },
   backlogHandleLeft: {
     flexDirection: 'row',
@@ -1775,19 +2024,19 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   backlogTitle: {
-    fontSize: FontSizes.md,
-    fontWeight: '600',
+    fontSize: FontSizes.lg,
+    fontWeight: '700',
   },
   backlogCount: {
     paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
+    paddingVertical: 3,
     borderRadius: BorderRadius.full,
-    minWidth: 24,
+    minWidth: 28,
     alignItems: 'center',
   },
   backlogCountText: {
-    fontSize: FontSizes.xs,
-    fontWeight: '600',
+    fontSize: FontSizes.sm,
+    fontWeight: '700',
   },
   backlogContent: {
     paddingBottom: Spacing.md,
@@ -1822,5 +2071,98 @@ const styles = StyleSheet.create({
   addToBoardText: {
     fontSize: FontSizes.xs,
     fontWeight: '600',
+  },
+  // Archive section
+  archiveAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.sm + 2,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    marginBottom: Spacing.md,
+  },
+  archiveAllText: {
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
+  },
+  archivedDrawer: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.xl,
+    overflow: 'hidden',
+  },
+  archivedHandle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+  },
+  archivedHandleLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  archivedTitle: {
+    fontSize: FontSizes.md,
+    fontWeight: '600',
+  },
+  archivedCount: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
+    minWidth: 24,
+    alignItems: 'center',
+  },
+  archivedCountText: {
+    fontSize: FontSizes.xs,
+    fontWeight: '600',
+  },
+  archivedContent: {
+    paddingHorizontal: Spacing.md,
+    paddingBottom: Spacing.md,
+    gap: Spacing.sm,
+  },
+  massDeleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.lg,
+    marginBottom: Spacing.xs,
+  },
+  massDeleteText: {
+    fontSize: FontSizes.xs,
+    fontWeight: '600',
+  },
+  archivedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    gap: Spacing.sm,
+  },
+  archivedTaskTitle: {
+    fontSize: FontSizes.sm,
+    fontWeight: '500',
+    textDecorationLine: 'line-through',
+  },
+  archivedTaskMeta: {
+    fontSize: FontSizes.xs,
+    marginTop: 2,
+  },
+  archivedActions: {
+    flexDirection: 'row',
+    gap: Spacing.xs,
+  },
+  archivedActionBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: BorderRadius.md,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });

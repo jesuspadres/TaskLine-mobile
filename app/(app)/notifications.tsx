@@ -6,14 +6,16 @@ import {
   TouchableOpacity,
   RefreshControl,
   StyleSheet,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/hooks/useTheme';
+import { useCollapsibleFilters } from '@/hooks/useCollapsibleFilters';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useTranslations } from '@/hooks/useTranslations';
-import { FilterChips, EmptyState, showToast } from '@/components';
+import { FilterChips, EmptyState, ConfirmDialog, showToast } from '@/components';
 import { Spacing, FontSizes, BorderRadius, Shadows } from '@/constants/theme';
 
 function getNotificationIcon(type: string): keyof typeof Ionicons.glyphMap {
@@ -64,6 +66,7 @@ export default function NotificationsScreen() {
   const { colors } = useTheme();
   const router = useRouter();
   const { t } = useTranslations();
+  const { filterContainerStyle, onFilterLayout, onScroll, filterHeight } = useCollapsibleFilters();
   const {
     notifications,
     unreadCount,
@@ -72,9 +75,13 @@ export default function NotificationsScreen() {
     markAsRead,
     markAllAsRead,
     archiveNotification,
+    archiveAllRead,
   } = useNotifications();
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [refreshing, setRefreshing] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const readCount = notifications.filter((n) => n.is_read).length;
 
   const FILTERS = useMemo(() => [
     { key: 'all', label: t('notifications.all') },
@@ -108,6 +115,61 @@ export default function NotificationsScreen() {
     }
   };
 
+  const renderNotification = useCallback(({ item }: { item: typeof notifications[0] }) => {
+    const iconName = getNotificationIcon(item.type);
+    return (
+      <TouchableOpacity
+        style={[
+          styles.notificationCard,
+          {
+            backgroundColor: item.is_read ? colors.surface : colors.infoLight,
+            borderColor: colors.border,
+          },
+        ]}
+        onPress={() => handleNotificationPress(item)}
+        activeOpacity={0.7}
+      >
+        <View
+          style={[
+            styles.iconCircle,
+            { backgroundColor: item.is_read ? colors.surfaceSecondary : colors.primary + '20' },
+          ]}
+        >
+          <Ionicons
+            name={iconName}
+            size={18}
+            color={item.is_read ? colors.textTertiary : colors.primary}
+          />
+        </View>
+        <View style={styles.notificationContent}>
+          <Text
+            style={[
+              styles.notificationTitle,
+              { color: colors.text, fontWeight: item.is_read ? '400' : '600' },
+            ]}
+            numberOfLines={1}
+          >
+            {item.title}
+          </Text>
+          {item.message && (
+            <Text style={[styles.notificationMessage, { color: colors.textSecondary }]} numberOfLines={2}>
+              {item.message}
+            </Text>
+          )}
+          <Text style={[styles.notificationTime, { color: colors.textTertiary }]}>
+            {getRelativeTime(item.created_at, t)}
+          </Text>
+        </View>
+        <TouchableOpacity
+          onPress={() => archiveNotification(item.id)}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="close" size={16} color={colors.textTertiary} />
+        </TouchableOpacity>
+      </TouchableOpacity>
+    );
+  }, [colors, t, handleNotificationPress, archiveNotification]);
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
@@ -115,93 +177,74 @@ export default function NotificationsScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: colors.text }]}>{t('notifications.title')}</Text>
-        {unreadCount > 0 && (
-          <TouchableOpacity onPress={markAllAsRead} style={styles.markAllButton}>
-            <Text style={[styles.markAllText, { color: colors.primary }]}>{t('notifications.markAllRead')}</Text>
-          </TouchableOpacity>
-        )}
+        <View style={styles.headerActions}>
+          {readCount > 0 && (
+            <TouchableOpacity onPress={() => setShowDeleteConfirm(true)} style={styles.markAllButton}>
+              <Ionicons name="trash-outline" size={18} color={colors.error} />
+            </TouchableOpacity>
+          )}
+          {unreadCount > 0 && (
+            <TouchableOpacity onPress={markAllAsRead} style={styles.markAllButton}>
+              <Text style={[styles.markAllText, { color: colors.primary }]}>{t('notifications.markAllRead')}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
-      <View style={styles.filterRow}>
-        <FilterChips
-          options={FILTERS}
-          selected={filter}
-          onSelect={handleFilterChange}
+      <View style={{ flex: 1, overflow: 'hidden' }}>
+        <Animated.View style={[filterContainerStyle, { backgroundColor: colors.background }]} onLayout={onFilterLayout}>
+          <View style={styles.filterRow}>
+            <FilterChips
+              options={FILTERS}
+              selected={filter}
+              onSelect={handleFilterChange}
+            />
+          </View>
+        </Animated.View>
+
+        <Animated.FlatList
+          data={filtered}
+          keyExtractor={(item) => item.id}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={colors.primary}
+            />
+          }
+          contentContainerStyle={[
+            filtered.length === 0 ? styles.emptyContainer : styles.list,
+            { paddingTop: filterHeight },
+          ]}
+          ListEmptyComponent={
+            <EmptyState
+              icon="notifications-off-outline"
+              title={filter === 'unread' ? t('notifications.noUnread') : t('notifications.noNotifications')}
+              description={filter === 'unread' ? t('notifications.noUnreadDesc') : t('notifications.noNotificationsDesc')}
+            />
+          }
+          removeClippedSubviews
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          initialNumToRender={10}
+          renderItem={renderNotification}
         />
       </View>
 
-      <FlatList
-        data={filtered}
-        keyExtractor={(item) => item.id}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={colors.primary}
-          />
-        }
-        contentContainerStyle={filtered.length === 0 ? styles.emptyContainer : styles.list}
-        ListEmptyComponent={
-          <EmptyState
-            icon="notifications-off-outline"
-            title={filter === 'unread' ? t('notifications.noUnread') : t('notifications.noNotifications')}
-            description={filter === 'unread' ? t('notifications.noUnreadDesc') : t('notifications.noNotificationsDesc')}
-          />
-        }
-        renderItem={({ item }) => {
-          const iconName = getNotificationIcon(item.type);
-          return (
-            <TouchableOpacity
-              style={[
-                styles.notificationCard,
-                {
-                  backgroundColor: item.is_read ? colors.surface : colors.infoLight,
-                  borderColor: colors.border,
-                },
-              ]}
-              onPress={() => handleNotificationPress(item)}
-              activeOpacity={0.7}
-            >
-              <View
-                style={[
-                  styles.iconCircle,
-                  { backgroundColor: item.is_read ? colors.surfaceSecondary : colors.primary + '20' },
-                ]}
-              >
-                <Ionicons
-                  name={iconName}
-                  size={18}
-                  color={item.is_read ? colors.textTertiary : colors.primary}
-                />
-              </View>
-              <View style={styles.notificationContent}>
-                <Text
-                  style={[
-                    styles.notificationTitle,
-                    { color: colors.text, fontWeight: item.is_read ? '400' : '600' },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {item.title}
-                </Text>
-                {item.message && (
-                  <Text style={[styles.notificationMessage, { color: colors.textSecondary }]} numberOfLines={2}>
-                    {item.message}
-                  </Text>
-                )}
-                <Text style={[styles.notificationTime, { color: colors.textTertiary }]}>
-                  {getRelativeTime(item.created_at, t)}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => archiveNotification(item.id)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Ionicons name="close" size={16} color={colors.textTertiary} />
-              </TouchableOpacity>
-            </TouchableOpacity>
-          );
+      <ConfirmDialog
+        visible={showDeleteConfirm}
+        title={t('notifications.deleteReadTitle')}
+        message={t('notifications.deleteReadMessage', { count: readCount })}
+        confirmLabel={t('notifications.deleteReadConfirm')}
+        onConfirm={async () => {
+          setShowDeleteConfirm(false);
+          await archiveAllRead();
+          showToast('success', t('notifications.deleteReadSuccess'));
         }}
+        onCancel={() => setShowDeleteConfirm(false)}
+        variant="danger"
       />
     </SafeAreaView>
   );
@@ -225,6 +268,11 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.xl,
     fontWeight: '700',
     flex: 1,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
   },
   markAllButton: {
     paddingHorizontal: Spacing.sm,

@@ -29,6 +29,8 @@ import { ENV } from '@/lib/env';
 import { getPlan } from '@/lib/plans';
 import { showToast } from '@/components';
 import { ConfirmDialog } from '@/components';
+import { createFoundingLockInSession } from '@/lib/websiteApi';
+import { secureLog } from '@/lib/security';
 
 interface SettingItem {
   id: string;
@@ -63,7 +65,8 @@ export default function SettingsScreen() {
   const { colors, isDark, mode, setMode } = useTheme();
   const { t, locale, setLocale } = useTranslations();
   const { counts } = useNavigationBadges();
-  const { tier } = useSubscription();
+  const subscription = useSubscription();
+  const { tier } = subscription;
   const [loading, setLoading] = useState(false);
   const [notifications, setNotifications] = useState(true);
   const [emailNotifications, setEmailNotifications] = useState(true);
@@ -89,6 +92,12 @@ export default function SettingsScreen() {
 
   // Change password confirm dialog state
   const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
+
+  // Delete account state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [showDeletePasswordModal, setShowDeletePasswordModal] = useState(false);
 
   // Storage usage state
   const [storageInfo, setStorageInfo] = useState<{
@@ -119,6 +128,108 @@ export default function SettingsScreen() {
       }
     })();
   }, [user?.id]);
+
+  const [subCheckoutLoading, setSubCheckoutLoading] = useState(false);
+
+  const handleEnterCard = async () => {
+    setSubCheckoutLoading(true);
+    try {
+      const url = await createFoundingLockInSession();
+      await Linking.openURL(url);
+    } catch (error: any) {
+      secureLog.error('Lock-in error:', error.message);
+      showToast('error', t('plans.checkoutError'));
+    } finally {
+      setSubCheckoutLoading(false);
+    }
+  };
+
+  const renderSubscriptionCard = () => {
+    const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
+    const showFoundingBanner = subscription.isFoundingMember && subscription.isTrialing && !subscription.cardEntered;
+    const showLockedIn = subscription.isFoundingMember && subscription.cardEntered;
+
+    return (
+      <View style={[settingsStyles.subCard, { borderColor: colors.border }]}>
+        {/* Plan name + badges */}
+        <View style={settingsStyles.subCardHeader}>
+          <Text style={[settingsStyles.subPlanName, { color: colors.text }]}>
+            {tierLabel}
+          </Text>
+          <View style={[settingsStyles.subBadge, { backgroundColor: colors.primary }]}>
+            <Text style={settingsStyles.subBadgeText}>{tierLabel.toUpperCase()}</Text>
+          </View>
+          {subscription.isFoundingMember && (
+            <View style={[settingsStyles.subBadge, { backgroundColor: colors.accent }]}>
+              <Text style={settingsStyles.subBadgeText}>{t('settings.firstFifty')}</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Trial info */}
+        {subscription.isTrialing && subscription.trialEnd && (
+          <View style={settingsStyles.subTrialRow}>
+            <Text style={[settingsStyles.subTrialText, { color: colors.textSecondary }]}>
+              {subscription.daysRemaining} {t('plans.daysRemaining')}
+            </Text>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={[settingsStyles.subTrialLabel, { color: colors.textTertiary }]}>
+                {t('plans.trialEnds')}
+              </Text>
+              <Text style={[settingsStyles.subTrialDate, { color: colors.text }]}>
+                {new Date(subscription.trialEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Locked-in confirmation */}
+        {showLockedIn && (
+          <View style={[settingsStyles.subLockedIn, { backgroundColor: colors.successLight }]}>
+            <Ionicons name="checkmark-circle" size={16} color={colors.success} />
+            <Text style={[settingsStyles.subLockedInText, { color: colors.success }]}>
+              {t('plans.discountLockedIn')}
+            </Text>
+          </View>
+        )}
+
+        {/* Founding member lock-in banner */}
+        {showFoundingBanner && (
+          <View style={[settingsStyles.subLockIn, { backgroundColor: colors.warningLight, borderColor: colors.warning }]}>
+            <View style={settingsStyles.subLockInContent}>
+              <Text style={[settingsStyles.subLockInTitle, { color: colors.text }]}>
+                {t('settings.lockInOffer')}
+              </Text>
+              <Text style={[settingsStyles.subLockInSubtitle, { color: colors.textSecondary }]}>
+                {t('settings.lockInOfferSubtitle')}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[settingsStyles.subEnterCardBtn, { backgroundColor: colors.primary }]}
+              onPress={handleEnterCard}
+              disabled={subCheckoutLoading}
+            >
+              {subCheckoutLoading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={settingsStyles.subEnterCardText}>{t('settings.enterCard')}</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Compare Plans button */}
+        <TouchableOpacity
+          style={[settingsStyles.subCompareBtn, { borderColor: colors.border }]}
+          onPress={() => router.push('/(app)/plans' as any)}
+        >
+          <Text style={[settingsStyles.subCompareBtnText, { color: colors.text }]}>
+            {t('settings.comparePlans')}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
 
   const handleLogout = async () => {
     Alert.alert(
@@ -221,6 +332,48 @@ export default function SettingsScreen() {
       showToast('success', t('settings.passwordResetSent'));
     } catch (error: any) {
       showToast('error', error.message || t('settings.passwordResetError'));
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!deletePassword.trim()) {
+      showToast('error', t('settings.enterPassword'));
+      return;
+    }
+    setDeleting(true);
+    try {
+      // Verify password first
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: user?.email || '',
+        password: deletePassword,
+      });
+      if (signInError) throw new Error(t('settings.invalidPassword'));
+
+      // Call server-side account deletion RPC
+      const { error: deleteError } = await (supabase.rpc as any)('delete_user_account', {
+        p_user_id: user?.id,
+      });
+
+      if (deleteError) {
+        // If RPC doesn't exist, sign out and inform user
+        if (deleteError.message?.includes('function') || deleteError.code === '42883') {
+          // Fallback: sign out and direct user to web for full deletion
+          await logout();
+          router.replace('/(auth)/login');
+          return;
+        }
+        throw deleteError;
+      }
+
+      // Sign out after successful deletion
+      await logout();
+      router.replace('/(auth)/login');
+    } catch (error: any) {
+      showToast('error', error.message || t('settings.deleteAccountError'));
+    } finally {
+      setDeleting(false);
+      setShowDeletePasswordModal(false);
+      setDeletePassword('');
     }
   };
 
@@ -389,9 +542,8 @@ export default function SettingsScreen() {
           id: 'subscription',
           icon: 'diamond-outline',
           title: t('settings.subscription'),
-          subtitle: `${tier.charAt(0).toUpperCase() + tier.slice(1)} Plan`,
-          type: 'link',
-          onPress: () => router.push('/(app)/plans' as any),
+          type: 'custom',
+          render: () => renderSubscriptionCard(),
         },
       ],
     },
@@ -468,6 +620,14 @@ export default function SettingsScreen() {
           onPress: () => router.push('/(app)/invoice-settings' as any),
         },
         {
+          id: 'stripe_payments',
+          icon: 'card-outline',
+          title: t('settings.stripePayments'),
+          subtitle: t('settings.stripePaymentsSubtitle'),
+          type: 'link',
+          onPress: () => router.push('/(app)/stripe-payments' as any),
+        },
+        {
           id: 'booking_settings',
           icon: 'calendar-outline',
           title: t('settings.bookingSettings'),
@@ -497,6 +657,22 @@ export default function SettingsScreen() {
           onPress: () => Linking.openURL('mailto:support@solvrlabs.com?subject=TaskLine%20Mobile%20Feedback'),
         },
         {
+          id: 'privacy',
+          icon: 'shield-checkmark-outline',
+          title: t('settings.privacyPolicy'),
+          subtitle: t('settings.privacyPolicySubtitle'),
+          type: 'link',
+          onPress: () => router.push('/(app)/privacy-policy' as any),
+        },
+        {
+          id: 'terms',
+          icon: 'document-text-outline',
+          title: t('settings.termsOfService'),
+          subtitle: t('settings.termsOfServiceSubtitle'),
+          type: 'link',
+          onPress: () => router.push('/(app)/terms-of-service' as any),
+        },
+        {
           id: 'about',
           icon: 'information-circle-outline',
           title: t('settings.about'),
@@ -519,6 +695,15 @@ export default function SettingsScreen() {
           title: t('settings.signOut'),
           type: 'action',
           onPress: handleLogout,
+          dangerous: true,
+        },
+        {
+          id: 'delete_account',
+          icon: 'trash-outline',
+          title: t('settings.deleteAccount'),
+          subtitle: t('settings.deleteAccountSubtitle'),
+          type: 'action',
+          onPress: () => setShowDeleteConfirm(true),
           dangerous: true,
         },
       ],
@@ -782,6 +967,97 @@ export default function SettingsScreen() {
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
                   <Text style={styles.saveButtonText}>{t('settings.updateEmail')}</Text>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </SafeAreaView>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Delete Account Confirm Dialog */}
+      <ConfirmDialog
+        visible={showDeleteConfirm}
+        title={t('settings.deleteAccount')}
+        message={t('settings.deleteAccountWarning')}
+        confirmLabel={t('settings.deleteAccountConfirmLabel')}
+        cancelLabel={t('common.cancel')}
+        onConfirm={() => {
+          setShowDeleteConfirm(false);
+          setDeletePassword('');
+          setShowDeletePasswordModal(true);
+        }}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
+
+      {/* Delete Account Password Modal */}
+      <Modal
+        visible={showDeletePasswordModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowDeletePasswordModal(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={[styles.modalContainer, { backgroundColor: colors.background }]}
+        >
+          <SafeAreaView style={styles.modalSafeArea} edges={['top']}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface }]}>
+              <TouchableOpacity
+                onPress={() => { setShowDeletePasswordModal(false); setDeletePassword(''); }}
+                style={styles.modalCloseButton}
+              >
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+              <Text style={[styles.modalTitle, { color: colors.error }]}>{t('settings.deleteAccount')}</Text>
+              <View style={styles.modalHeaderSpacer} />
+            </View>
+
+            <ScrollView
+              style={styles.modalScrollView}
+              contentContainerStyle={styles.modalScrollContent}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+            >
+              <View style={[styles.deleteWarningBox, { backgroundColor: colors.errorLight }]}>
+                <Ionicons name="warning" size={24} color={colors.error} />
+                <Text style={[styles.deleteWarningText, { color: colors.error }]}>
+                  {t('settings.deleteAccountPermanent')}
+                </Text>
+              </View>
+
+              <Text style={[styles.emailModalHint, { color: colors.textSecondary }]}>
+                {t('settings.deleteAccountPasswordHint')}
+              </Text>
+
+              <View style={styles.inputGroup}>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>{t('settings.currentPassword')}</Text>
+                <View style={[styles.inputWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <Ionicons name="lock-closed-outline" size={20} color={colors.textTertiary} style={styles.inputIcon} />
+                  <TextInput
+                    style={[styles.input, { color: colors.text }]}
+                    value={deletePassword}
+                    onChangeText={setDeletePassword}
+                    placeholder={t('settings.passwordPlaceholder')}
+                    placeholderTextColor={colors.textTertiary}
+                    secureTextEntry
+                    returnKeyType="done"
+                  />
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.saveButton,
+                  { backgroundColor: colors.error },
+                  deleting && styles.saveButtonDisabled,
+                ]}
+                onPress={handleDeleteAccount}
+                disabled={deleting}
+              >
+                {deleting ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.saveButtonText}>{t('settings.deleteAccountConfirmLabel')}</Text>
                 )}
               </TouchableOpacity>
             </ScrollView>
@@ -1232,10 +1508,127 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.xs,
     marginTop: Spacing.sm,
   },
+  // Delete account styles
+  deleteWarningBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.lg,
+    borderRadius: BorderRadius.lg,
+    marginBottom: Spacing.xl,
+    gap: Spacing.md,
+  },
+  deleteWarningText: {
+    flex: 1,
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
+    lineHeight: 20,
+  },
   // Email modal styles
   emailModalHint: {
     fontSize: FontSizes.sm,
     marginBottom: Spacing.xl,
     lineHeight: 20,
+  },
+});
+
+// Subscription card styles (separate to keep main styles cleaner)
+const settingsStyles = StyleSheet.create({
+  subCard: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.md,
+  },
+  subCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  subPlanName: {
+    fontSize: FontSizes.xl,
+    fontWeight: '800',
+  },
+  subBadge: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
+  },
+  subBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  subTrialRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  subTrialText: {
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
+  },
+  subTrialLabel: {
+    fontSize: FontSizes.xs,
+  },
+  subTrialDate: {
+    fontSize: FontSizes.md,
+    fontWeight: '700',
+  },
+  subLockedIn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.sm,
+    gap: Spacing.xs,
+    marginBottom: Spacing.md,
+  },
+  subLockedInText: {
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
+  },
+  subLockIn: {
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  subLockInContent: {
+    flex: 1,
+  },
+  subLockInTitle: {
+    fontSize: FontSizes.sm,
+    fontWeight: '700',
+  },
+  subLockInSubtitle: {
+    fontSize: FontSizes.xs,
+    lineHeight: 16,
+  },
+  subEnterCardBtn: {
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    minHeight: 36,
+    justifyContent: 'center',
+  },
+  subEnterCardText: {
+    color: '#fff',
+    fontSize: FontSizes.sm,
+    fontWeight: '700',
+  },
+  subCompareBtn: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.sm,
+    alignItems: 'center',
+  },
+  subCompareBtnText: {
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
   },
 });

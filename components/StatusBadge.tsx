@@ -21,7 +21,9 @@ type StatusType =
   | 'sent'
   | 'paid'
   | 'overdue'
-  | 'confirmed';
+  | 'confirmed'
+  | 'planning'
+  | 'archived';
 
 interface StatusBadgeProps {
   status: string;
@@ -49,6 +51,8 @@ function getStatusColors(status: string, colors: ThemeColors): { bg: string; tex
     paid: { bg: colors.successLight, text: colors.success },
     overdue: { bg: colors.errorLight, text: colors.error },
     confirmed: { bg: colors.successLight, text: colors.success },
+    planning: { bg: colors.infoLight, text: colors.info },
+    archived: { bg: colors.surfaceSecondary, text: colors.textTertiary },
   };
 
   return map[status.toLowerCase()] || { bg: colors.surfaceSecondary, text: colors.textSecondary };

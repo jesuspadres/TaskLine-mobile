@@ -13,9 +13,11 @@ import {
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/stores/authStore';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
+import { useTranslations } from '@/hooks/useTranslations';
 
 export default function SignupScreen() {
   const [name, setName] = useState('');
@@ -23,13 +25,20 @@ export default function SignupScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const { register } = useAuthStore();
   const { colors, isDark } = useTheme();
+  const { t } = useTranslations();
   const router = useRouter();
 
   const handleSignup = async () => {
     if (!name || !email || !password || !confirmPassword) {
-      Alert.alert('Error', 'Please fill in all fields');
+      Alert.alert(t('common.error'), t('auth.fillAllFields'));
+      return;
+    }
+
+    if (!agreedToTerms) {
+      Alert.alert(t('common.error'), t('auth.mustAgreeToTerms'));
       return;
     }
 
@@ -145,12 +154,37 @@ export default function SignupScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Terms */}
-          <Text style={[styles.terms, { color: colors.textSecondary }]}>
-            By signing up, you agree to our{' '}
-            <Text style={[styles.termsLink, { color: colors.primary }]}>Terms of Service</Text> and{' '}
-            <Text style={[styles.termsLink, { color: colors.primary }]}>Privacy Policy</Text>
-          </Text>
+          {/* Terms Agreement */}
+          <View style={styles.termsRow}>
+            <TouchableOpacity
+              style={[
+                styles.checkbox,
+                { borderColor: agreedToTerms ? colors.primary : colors.border },
+                agreedToTerms && { backgroundColor: colors.primary },
+              ]}
+              onPress={() => setAgreedToTerms(!agreedToTerms)}
+            >
+              {agreedToTerms && (
+                <Ionicons name="checkmark" size={14} color="#fff" />
+              )}
+            </TouchableOpacity>
+            <Text style={[styles.terms, { color: colors.textSecondary }]}>
+              {t('auth.agreePrefix')}{' '}
+              <Text
+                style={[styles.termsLink, { color: colors.primary }]}
+                onPress={() => router.push('/(app)/terms-of-service' as any)}
+              >
+                {t('legal.termsOfService')}
+              </Text>
+              {' '}{t('auth.and')}{' '}
+              <Text
+                style={[styles.termsLink, { color: colors.primary }]}
+                onPress={() => router.push('/(app)/privacy-policy' as any)}
+              >
+                {t('legal.privacyPolicy')}
+              </Text>
+            </Text>
+          </View>
 
           {/* Footer */}
           <View style={styles.footer}>
@@ -237,14 +271,29 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.md,
     fontWeight: '600',
   },
-  terms: {
-    fontSize: FontSizes.xs,
-    textAlign: 'center',
+  termsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     marginBottom: Spacing.xl,
+    gap: Spacing.sm,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    borderWidth: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 1,
+  },
+  terms: {
+    flex: 1,
+    fontSize: FontSizes.xs,
     lineHeight: 18,
   },
   termsLink: {
-    // color set via inline style
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
   footer: {
     flexDirection: 'row',

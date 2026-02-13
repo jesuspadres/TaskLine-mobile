@@ -293,7 +293,7 @@ export default function RequestsScreen() {
     }
   };
 
-  const clientOptions = clients.map(c => ({ key: c.id, label: c.name }));
+  const clientOptions = clients.map(c => ({ key: c.id, label: (c as any).email ? `${c.name} (${(c as any).email})` : c.name }));
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -324,7 +324,7 @@ export default function RequestsScreen() {
     router.push({ pathname: '/(app)/request-detail', params: { id: request.id } });
   };
 
-  const renderRequest = ({ item }: { item: RequestWithClient }) => {
+  const renderRequest = useCallback(({ item }: { item: RequestWithClient }) => {
     const itemColors = statusColors[item.status] || statusColors.new;
 
     return (
@@ -389,7 +389,7 @@ export default function RequestsScreen() {
         )}
       </TouchableOpacity>
     );
-  };
+  }, [colors, statusColors, navigateToDetail, openEditModal, formatDate, handleConvertToProject]);
 
   if (loading) {
     return (
@@ -454,6 +454,10 @@ export default function RequestsScreen() {
         keyExtractor={(item) => item.id}
         keyboardDismissMode="on-drag"
         contentContainerStyle={styles.listContent}
+        removeClippedSubviews
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        initialNumToRender={10}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
@@ -500,6 +504,7 @@ export default function RequestsScreen() {
             onChange={setFormClientId}
             placeholder="Select a client"
             error={formErrors.client}
+            searchable
           />
 
           <Select
@@ -575,6 +580,7 @@ export default function RequestsScreen() {
             onChange={setFormClientId}
             placeholder="Select a client"
             error={formErrors.client}
+            searchable
           />
 
           <Select

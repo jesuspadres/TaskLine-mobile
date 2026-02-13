@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -18,7 +19,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
-import { showToast } from '@/components';
+import { showToast, Select } from '@/components';
 
 export default function InvoiceSettingsScreen() {
   const router = useRouter();
@@ -29,8 +30,30 @@ export default function InvoiceSettingsScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // Form state — website only stores payment_instructions in user_settings
+  // Form state
   const [paymentInstructions, setPaymentInstructions] = useState('');
+  const [defaultTaxRate, setDefaultTaxRate] = useState('');
+  const [defaultCurrency, setDefaultCurrency] = useState('USD');
+  const [defaultPaymentTerms, setDefaultPaymentTerms] = useState('');
+  const [defaultInvoiceNotes, setDefaultInvoiceNotes] = useState('');
+  const [autoSendInvoice, setAutoSendInvoice] = useState(false);
+
+  const currencyOptions = useMemo(() => [
+    { key: 'USD', label: 'USD ($)' },
+    { key: 'MXN', label: 'MXN ($)' },
+    { key: 'EUR', label: 'EUR (\u20AC)' },
+    { key: 'GBP', label: 'GBP (\u00A3)' },
+    { key: 'CAD', label: 'CAD ($)' },
+    { key: 'AUD', label: 'AUD ($)' },
+  ], []);
+
+  const paymentTermsOptions = useMemo(() => [
+    { key: '', label: '\u2014' },
+    { key: 'due_on_receipt', label: t('invoiceSettings.dueOnReceipt') },
+    { key: 'net_15', label: t('invoiceSettings.net15') },
+    { key: 'net_30', label: t('invoiceSettings.net30') },
+    { key: 'net_60', label: t('invoiceSettings.net60') },
+  ], [t]);
 
   // Load existing settings
   useEffect(() => {
@@ -39,17 +62,21 @@ export default function InvoiceSettingsScreen() {
     const loadSettings = async () => {
       try {
         const { data, error } = await (supabase.from('user_settings') as any)
-          .select('payment_instructions')
+          .select('payment_instructions, default_tax_rate, default_currency, default_payment_terms, default_invoice_notes, auto_send_invoice')
           .eq('user_id', user.id)
           .single();
 
         if (error && error.code !== 'PGRST116') {
-          // PGRST116 = no rows found, which is expected for new users
           throw error;
         }
 
         if (data) {
           setPaymentInstructions(data.payment_instructions || '');
+          setDefaultTaxRate(data.default_tax_rate != null ? String(data.default_tax_rate) : '');
+          setDefaultCurrency(data.default_currency || 'USD');
+          setDefaultPaymentTerms(data.default_payment_terms || '');
+          setDefaultInvoiceNotes(data.default_invoice_notes || '');
+          setAutoSendInvoice(!!data.auto_send_invoice);
         }
       } catch (error: any) {
         showToast('error', error.message || t('common.error'));
@@ -66,11 +93,18 @@ export default function InvoiceSettingsScreen() {
 
     setSaving(true);
     try {
+      const taxRate = defaultTaxRate.trim() ? parseFloat(defaultTaxRate) : null;
+
       const { error } = await (supabase.from('user_settings') as any).upsert(
         {
           user_id: user.id,
           payment_instructions: paymentInstructions.trim(),
-        },
+          default_tax_rate: taxRate,
+          default_currency: defaultCurrency,
+          default_payment_terms: defaultPaymentTerms || null,
+          default_invoice_notes: defaultInvoiceNotes.trim() || null,
+          auto_send_invoice: autoSendInvoice,
+        } as any,
         { onConflict: 'user_id' }
       );
 
@@ -142,6 +176,59 @@ export default function InvoiceSettingsScreen() {
             {t('invoiceSettings.description')}
           </Text>
 
+          {/* Default Currency */}
+          <View style={styles.inputGroup}>
+            <Select
+              label={t('invoiceSettings.currency')}
+              options={currencyOptions}
+              value={defaultCurrency}
+              onChange={setDefaultCurrency}
+            />
+          </View>
+
+          {/* Default Payment Terms */}
+          <View style={styles.inputGroup}>
+            <Select
+              label={t('invoiceSettings.paymentTerms')}
+              placeholder={t('invoiceSettings.paymentTermsPlaceholder')}
+              options={paymentTermsOptions}
+              value={defaultPaymentTerms}
+              onChange={setDefaultPaymentTerms}
+            />
+          </View>
+
+          {/* Default Tax Rate */}
+          <View style={styles.inputGroup}>
+            <Text style={[styles.inputLabel, { color: colors.text }]}>
+              {t('invoiceSettings.taxRate')}
+            </Text>
+            <View
+              style={[
+                styles.inputWrapper,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Ionicons
+                name="calculator-outline"
+                size={20}
+                color={colors.textTertiary}
+                style={styles.inputIcon}
+              />
+              <TextInput
+                style={[styles.input, { color: colors.text }]}
+                value={defaultTaxRate}
+                onChangeText={setDefaultTaxRate}
+                placeholder="0.00"
+                placeholderTextColor={colors.textTertiary}
+                keyboardType="decimal-pad"
+              />
+              <Text style={[styles.inputSuffix, { color: colors.textTertiary }]}>%</Text>
+            </View>
+          </View>
+
           {/* Payment Instructions */}
           <View style={styles.inputGroup}>
             <Text style={[styles.inputLabel, { color: colors.text }]}>
@@ -174,6 +261,58 @@ export default function InvoiceSettingsScreen() {
                 autoCapitalize="sentences"
               />
             </View>
+          </View>
+
+          {/* Default Invoice Notes */}
+          <View style={styles.inputGroup}>
+            <Text style={[styles.inputLabel, { color: colors.text }]}>
+              {t('invoiceSettings.defaultNotes')}
+            </Text>
+            <View
+              style={[
+                styles.multilineWrapper,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Ionicons
+                name="document-text-outline"
+                size={20}
+                color={colors.textTertiary}
+                style={styles.multilineIcon}
+              />
+              <TextInput
+                style={[styles.multilineInput, { color: colors.text }]}
+                value={defaultInvoiceNotes}
+                onChangeText={setDefaultInvoiceNotes}
+                placeholder={t('invoiceSettings.defaultNotesPlaceholder')}
+                placeholderTextColor={colors.textTertiary}
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+                autoCapitalize="sentences"
+              />
+            </View>
+          </View>
+
+          {/* Auto-send Toggle */}
+          <View style={[styles.toggleRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={styles.toggleContent}>
+              <Text style={[styles.toggleLabel, { color: colors.text }]}>
+                {t('invoiceSettings.autoSend')}
+              </Text>
+              <Text style={[styles.toggleDescription, { color: colors.textSecondary }]}>
+                {t('invoiceSettings.autoSendDescription')}
+              </Text>
+            </View>
+            <Switch
+              value={autoSendInvoice}
+              onValueChange={setAutoSendInvoice}
+              trackColor={{ false: colors.border, true: colors.primary + '60' }}
+              thumbColor={autoSendInvoice ? colors.primary : colors.textTertiary}
+            />
           </View>
 
           {/* Save Button */}
@@ -298,5 +437,31 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.md,
     fontWeight: '600',
     color: '#fff',
+  },
+  inputSuffix: {
+    fontSize: FontSizes.md,
+    fontWeight: '500',
+    marginLeft: Spacing.xs,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    padding: Spacing.lg,
+    marginBottom: Spacing.xl,
+  },
+  toggleContent: {
+    flex: 1,
+    marginRight: Spacing.md,
+  },
+  toggleLabel: {
+    fontSize: FontSizes.md,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  toggleDescription: {
+    fontSize: FontSizes.sm,
+    lineHeight: 18,
   },
 });

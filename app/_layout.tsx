@@ -5,8 +5,10 @@ import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useAuthStore } from '@/stores/authStore';
 import { useThemeStore } from '@/stores/themeStore';
 import { useTheme } from '@/hooks/useTheme';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { ToastProvider } from '@/components/Toast';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { OfflineBanner } from '@/components/OfflineBanner';
 
 export default function RootLayout() {
   const { user, loading, initialized, initialize } = useAuthStore();
@@ -14,6 +16,9 @@ export default function RootLayout() {
   const { colors, isDark } = useTheme();
   const segments = useSegments();
   const router = useRouter();
+
+  // Initialize network monitoring
+  useNetworkStatus();
 
   useEffect(() => {
     initialize();
@@ -44,10 +49,13 @@ export default function RootLayout() {
     <ErrorBoundary>
       <ToastProvider>
         <StatusBar style={isDark ? 'light' : 'dark'} />
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-          <Stack.Screen name="(app)" options={{ headerShown: false }} />
-        </Stack>
+        <View style={{ flex: 1 }}>
+          <OfflineBanner />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+            <Stack.Screen name="(app)" options={{ headerShown: false }} />
+          </Stack>
+        </View>
       </ToastProvider>
     </ErrorBoundary>
   );

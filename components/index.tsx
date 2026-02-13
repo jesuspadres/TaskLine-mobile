@@ -23,3 +23,4 @@ export { CriticalAlertsCard } from './CriticalAlertsCard';
 export { LoadingSkeleton, CardSkeleton, ListSkeleton, StatsSkeleton, SkeletonBox } from './LoadingSkeleton';
 export { ToastProvider, showToast } from './Toast';
 export { FloatingActionButton } from './FloatingActionButton';
+export { OfflineBanner } from './OfflineBanner';

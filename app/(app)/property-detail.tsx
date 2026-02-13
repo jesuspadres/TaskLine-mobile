@@ -78,7 +78,7 @@ export default function PropertyDetailScreen() {
   ], [t]);
 
   const clientOptions = useMemo(() =>
-    clients.map((c) => ({ key: c.id, label: c.name })),
+    clients.map((c) => ({ key: c.id, label: (c as any).email ? `${c.name} (${(c as any).email})` : c.name })),
   [clients]);
 
   // ─── Data Fetching ───────────────────────────────────────────
@@ -685,6 +685,7 @@ export default function PropertyDetailScreen() {
             options={clientOptions}
             value={form.client_id || null}
             onChange={(value) => setForm({ ...form, client_id: value })}
+            searchable
           />
 
           <Select

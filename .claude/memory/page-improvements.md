@@ -31,8 +31,8 @@ Mobile source: `c:\Users\jezzi\OneDrive\Documents\taskline-mobile\taskline-mobil
   - Fields: business name, type, phone, tax ID, website, address
   - Saves to `user_metadata` via `supabase.auth.updateUser()`
 - [x] Invoice/Payment Settings — `app/(app)/invoice-settings.tsx`
-  - Fields: payment terms, payment instructions, tax rate, default notes
-  - Saves to `user_settings` table via upsert
+  - Fields: default currency (Select), default payment terms (Select), default tax rate (number), payment instructions, default invoice notes, auto-send toggle
+  - Saves to `user_settings` table via upsert (6 columns: payment_instructions, default_tax_rate, default_currency, default_payment_terms, default_invoice_notes, auto_send_invoice)
 - [x] Notification Settings — `app/(app)/notification-settings.tsx`
   - 6 in-app toggles + 5 email toggles with auto-save
   - Saves to `notification_preferences` table
@@ -225,6 +225,19 @@ Mobile source: `c:\Users\jezzi\OneDrive\Documents\taskline-mobile\taskline-mobil
 - [x] Drawer hidden entirely when no backlog tasks and collapsed
 - [x] Added 3 more i18n keys (backlogDrawer, backlogEmpty, addToBoard)
 
+### Round 4 — Task Archiving (website sync)
+- [x] Separated active vs archived tasks using `archived_at` column
+- [x] Stats and header count use active tasks only (excludes archived)
+- [x] Archive button on completed task cards in status actions
+- [x] "Archive all completed" button above archived section
+- [x] Collapsible "Archived" section at bottom of list view
+- [x] Archived cards show strikethrough title, archive date, project name
+- [x] Unarchive (arrow-undo) and delete (trash) buttons on each archived card
+- [x] "Delete all archived" mass action with confirm dialog
+- [x] ConfirmDialog for both mass archive and mass delete operations
+- [x] All operations direct Supabase calls (online-only, not queued)
+- [x] Added ~14 more i18n keys (archived, archiveTask, unarchive, massArchive, etc.)
+
 ## Invoices — `app/(app)/invoices.tsx`
 **Status: [x] DONE**
 
@@ -292,14 +305,63 @@ Mobile source: `c:\Users\jezzi\OneDrive\Documents\taskline-mobile\taskline-mobil
 ### Still TODO
 - [ ] Compare full feature set with website notifications page
 
+## App Store Compliance — Deployment Readiness
+**Status: [x] DONE (Phase 1)**
+
+### Configuration
+- [x] Created `eas.json` with development, preview, and production build profiles
+- [x] Added iOS privacy manifest (`privacyManifests`) to `app.json` — UserDefaults, FileTimestamp, SystemBootTime, DiskSpace
+- [x] Added `ITSAppUsesNonExemptEncryption: false` to iOS infoPlist
+- [x] Added Google Maps API key placeholder for Android in `app.json`
+
+### Legal Screens
+- [x] Privacy Policy — `app/(app)/privacy-policy.tsx` — 11 sections, fully i18n'd (EN+ES)
+- [x] Terms of Service — `app/(app)/terms-of-service.tsx` — 11 sections, fully i18n'd (EN+ES)
+- [x] Registered both screens in `app/(app)/_layout.tsx`
+- [x] Added Privacy Policy + Terms of Service links in Settings > Support section
+- [x] Added `legal` i18n namespace with ~45 keys in en.json and es.json
+
+### Signup Compliance
+- [x] Added agreement checkbox (must be checked before signup allowed)
+- [x] Terms of Service and Privacy Policy links are now tappable, navigate to screens
+- [x] Added `auth.fillAllFields`, `auth.mustAgreeToTerms`, `auth.agreePrefix`, `auth.and` i18n keys
+
+### Account Deletion (Apple Guideline 5.1.1 / Google Play)
+- [x] Added "Delete Account" button in Settings > Danger Zone
+- [x] Two-step flow: ConfirmDialog warning → password verification modal
+- [x] Warning box with icon explaining permanent data deletion
+- [x] Calls `delete_user_account` RPC (needs Supabase Edge Function on backend)
+- [x] Fallback: signs out user if RPC doesn't exist yet
+- [x] Added ~10 new settings i18n keys for deletion flow
+
+### Still TODO for Submission
+- [ ] Create `delete_user_account` Supabase RPC/Edge Function on backend
+- [ ] Decide on IAP strategy (RevenueCat vs Stripe External Purchase Link vs free-first launch)
+- [ ] Replace Google Maps API key placeholder with real key
+- [ ] Fill in EAS project ID, Apple Team ID, ASC App ID in eas.json
+- [ ] Create Apple Developer account + App Store Connect listing
+- [ ] Create Google Play Console account + listing
+- [ ] Prepare screenshots, app description, keywords
+- [ ] Complete Apple App Privacy questionnaire
+- [ ] Complete Google Play Data Safety form
+- [ ] Host Privacy Policy + Terms at public URLs for store listings
+- [ ] Test on real iOS and Android devices
+
 ## Plans — `app/(app)/plans.tsx`
-- [ ] Not started — need to compare with website
+**Status: [x] DONE**
 
-## Bookings — `app/(app)/bookings.tsx`
-- [ ] Not started — need to compare with website
+### Improvements Made
+- [x] Fixed `lib/plans.ts` — updated `PlanFeatures` interface with 7 new fields (clientPortal, invoices, projectTracking, taskManagement, fileSharing, emailNotifications, productCatalog)
+- [x] Changed `PlanData` to use `nameKey`/`descriptionKey` instead of hardcoded `name`/`description`
+- [x] Fixed ALL plan limits to match website (Free: 200MB storage, Pro: Unlimited clients/projects/tasks, 5GB storage, scheduler:true, etc.)
+- [x] Added `PLAN_FEATURE_KEYS` and `FEATURE_CATEGORIES` exports
+- [x] All hardcoded English strings replaced with `t()` i18n calls
+- [x] `FEATURE_LABELS` moved inside component as `useMemo` (i18n-safe, includes all 18 feature keys)
+- [x] Feature string values that are i18n keys (e.g. `featureValues.unlimited`, `supportLevels.email`) now resolved via `resolveFeatureValue()`
+- [x] Plan names/descriptions use `t(`plans.${plan.nameKey}`)` pattern
+- [x] Billing toggle, save badge, action buttons, manage billing link all i18n'd
+- [x] Added ~40 new i18n keys to en.json and es.json (`plans` namespace: planNames, planDescriptions, featureValues, supportLevels, feature labels)
 
-## Requests — `app/(app)/requests.tsx`
-- [ ] Not started — need to compare with website
 
 ## Client Detail — `app/(app)/client-detail.tsx`
 **Status: [x] DONE**

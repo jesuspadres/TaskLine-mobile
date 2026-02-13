@@ -20,6 +20,8 @@ import { useAuthStore } from '@/stores/authStore';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
+import { useOfflineData } from '@/hooks/useOfflineData';
+import { useOfflineMutation } from '@/hooks/useOfflineMutation';
 
 interface RequestData {
   id: string;
@@ -45,6 +47,12 @@ interface RequestData {
   client?: { id: string; name: string; email: string; phone?: string };
 }
 
+interface RequestDetailData {
+  request: RequestData | null;
+  messageCount: number;
+  matchedProperty: { id: string; name: string } | null;
+}
+
 export default function RequestDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -64,86 +72,76 @@ export default function RequestDetailScreen() {
     archived: { bg: colors.surfaceSecondary, text: colors.textTertiary },
   }), [colors]);
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [request, setRequest] = useState<RequestData | null>(null);
-  const [messageCount, setMessageCount] = useState(0);
-  const [updatingStatus, setUpdatingStatus] = useState(false);
+  const { data: requestData, loading, refreshing, refresh } = useOfflineData<RequestDetailData>(
+    `request_detail:${id}`,
+    async () => {
+      // Fetch request
+      const { data: reqData, error: reqError } = await supabase
+        .from('requests')
+        .select('*, client:clients(id, name, email, phone)')
+        .eq('id', id as string)
+        .single();
+      if (reqError) throw reqError;
+
+      // Fetch message count
+      let msgCount = 0;
+      try {
+        const { count, error: msgError } = await supabase
+          .from('request_messages')
+          .select('*', { count: 'exact', head: true })
+          .eq('request_id', id as string);
+        if (!msgError) msgCount = count ?? 0;
+      } catch (error) {
+        secureLog.error('Error fetching message count:', error);
+      }
+
+      // Fetch matching property
+      let matched: { id: string; name: string } | null = null;
+      const req = reqData as any;
+      if (req?.client_id && req?.address_formatted) {
+        try {
+          const { data: propsData } = await supabase
+            .from('properties')
+            .select('id, name, address_formatted')
+            .eq('client_id', req.client_id)
+            .order('created_at', { ascending: false });
+          const props = (propsData as any) || [];
+          const match = props.find((p: any) => p.address_formatted === req.address_formatted);
+          if (match) matched = { id: match.id, name: match.name };
+        } catch (error) {
+          secureLog.error('Error fetching properties:', error);
+        }
+      }
+
+      return {
+        request: req as RequestData,
+        messageCount: msgCount,
+        matchedProperty: matched,
+      };
+    },
+    { enabled: !!id },
+  );
+  const { mutate } = useOfflineMutation();
+
+  const request = requestData?.request ?? null;
+  const messageCount = requestData?.messageCount ?? 0;
   const [matchedProperty, setMatchedProperty] = useState<{
     id: string;
     name: string;
   } | null>(null);
   const [propertySaved, setPropertySaved] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+
+  // Sync matchedProperty from requestData into local state so save-property can update it
+  useEffect(() => {
+    if (requestData?.matchedProperty) {
+      setMatchedProperty(requestData.matchedProperty);
+    }
+  }, [requestData?.matchedProperty]);
 
   // Confirm dialog state
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [confirmAction, setConfirmAction] = useState<string>('');
-
-  // ================================================================
-  // FETCH
-  // ================================================================
-  const fetchRequest = useCallback(async () => {
-    if (!id) return;
-    try {
-      const { data, error } = await supabase
-        .from('requests')
-        .select('*, client:clients(id, name, email, phone)')
-        .eq('id', id)
-        .single();
-      if (error) throw error;
-      setRequest(data as any);
-    } catch (error) {
-      secureLog.error('Error fetching request:', error);
-      showToast('error', t('requestDetail.loadError'));
-    }
-  }, [id, t]);
-
-  const fetchMessageCount = useCallback(async () => {
-    if (!id) return;
-    try {
-      const { count, error } = await supabase
-        .from('request_messages')
-        .select('*', { count: 'exact', head: true })
-        .eq('request_id', id);
-      if (error) throw error;
-      setMessageCount(count ?? 0);
-    } catch (error) {
-      secureLog.error('Error fetching message count:', error);
-    }
-  }, [id]);
-
-  const fetchMatchingProperty = useCallback(async (clientId: string, addressFormatted: string | null) => {
-    if (!addressFormatted) return;
-    try {
-      const { data } = await supabase
-        .from('properties')
-        .select('id, name, address_formatted')
-        .eq('client_id', clientId)
-        .order('created_at', { ascending: false });
-      const props = (data as any) || [];
-      const match = props.find((p: any) => p.address_formatted === addressFormatted);
-      if (match) setMatchedProperty({ id: match.id, name: match.name });
-    } catch (error) {
-      secureLog.error('Error fetching properties:', error);
-    }
-  }, []);
-
-  const fetchAll = useCallback(async () => {
-    await Promise.all([fetchRequest(), fetchMessageCount()]);
-    setLoading(false);
-    setRefreshing(false);
-  }, [fetchRequest, fetchMessageCount]);
-
-  useEffect(() => { fetchAll(); }, [fetchAll]);
-
-  useEffect(() => {
-    if (request?.client_id) fetchMatchingProperty(request.client_id, request.address_formatted);
-  }, [request?.client_id, request?.address_formatted, fetchMatchingProperty]);
-
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchAll();
-  }, [fetchAll]);
 
   // ================================================================
   // ACTIONS
@@ -165,14 +163,18 @@ export default function RequestDetailScreen() {
     setConfirmVisible(false);
     setUpdatingStatus(true);
     try {
-      const { error } = await supabase
-        .from('requests')
-        .update({ status: confirmAction } as any)
-        .eq('id', request.id);
+      const { error } = await mutate({
+        table: 'requests',
+        operation: 'update',
+        data: { status: confirmAction },
+        matchColumn: 'id',
+        matchValue: request.id,
+        cacheKeys: [`request_detail:${id}`],
+      });
       if (error) throw error;
       haptics.notification(Haptics.NotificationFeedbackType.Success);
-      setRequest({ ...request, status: confirmAction });
       showToast('success', t('requestDetail.statusUpdated'));
+      refresh();
     } catch (error: any) {
       secureLog.error('Error updating request status:', error);
       showToast('error', t('requestDetail.statusError'));
@@ -216,24 +218,28 @@ export default function RequestDetailScreen() {
     try {
       const addressParts = request.address_formatted.split(',').map(s => s.trim());
       const name = addressParts[0] || request.address_formatted;
-      const { data, error } = await supabase.from('properties').insert({
-        user_id: user.id,
-        client_id: request.client_id,
-        name,
-        address_formatted: request.address_formatted,
-        address_street: addressParts[0] || null,
-        address_city: addressParts[1] || null,
-        address_state: addressParts[2] || null,
-        address_lat: request.address_lat,
-        address_lng: request.address_lng,
-      } as any).select('id').single();
+      const { error } = await mutate({
+        table: 'properties',
+        operation: 'insert',
+        data: {
+          user_id: user.id,
+          client_id: request.client_id,
+          name,
+          address_formatted: request.address_formatted,
+          address_street: addressParts[0] || null,
+          address_city: addressParts[1] || null,
+          address_state: addressParts[2] || null,
+          address_lat: request.address_lat,
+          address_lng: request.address_lng,
+        },
+        cacheKeys: [`request_detail:${id}`],
+      });
       if (error) throw error;
       haptics.notification(Haptics.NotificationFeedbackType.Success);
       showToast('success', t('requestDetail.propertySaved'));
       setPropertySaved(true);
-      if (data?.id) {
-        setMatchedProperty({ id: data.id, name });
-      }
+      setMatchedProperty({ id: 'saved', name });
+      refresh();
     } catch (error) {
       secureLog.error('Error saving property:', error);
       showToast('error', t('requestDetail.propertySaveError'));
@@ -333,7 +339,7 @@ export default function RequestDetailScreen() {
         ref={scrollViewRef}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
       >
         {/* Project Description Card — top priority */}
         {desc ? (
@@ -472,12 +478,6 @@ export default function RequestDetailScreen() {
                 style={styles.actionButton}
               />
               <Button
-                title={t('requestDetail.accept')}
-                onPress={() => promptStatusUpdate('accepted')}
-                loading={updatingStatus}
-                style={styles.actionButton}
-              />
-              <Button
                 title={t('requests.requestInfo')}
                 onPress={openMessages}
                 variant="secondary"
@@ -486,11 +486,17 @@ export default function RequestDetailScreen() {
               <Button
                 title={t('requestDetail.decline')}
                 onPress={() => promptStatusUpdate('declined')}
-                variant="danger"
+                variant="ghost"
                 loading={updatingStatus}
                 style={styles.actionButton}
               />
             </View>
+            <Button
+              title={t('requestDetail.accept')}
+              onPress={() => promptStatusUpdate('accepted')}
+              loading={updatingStatus}
+              style={styles.acceptButton}
+            />
           </View>
         )}
 
@@ -661,6 +667,7 @@ const styles = StyleSheet.create({
   // Action buttons
   actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   actionButton: { minWidth: '45%', flex: 1 },
+  acceptButton: { marginTop: Spacing.sm },
 
   // Messages card
   messagesCardRow: {

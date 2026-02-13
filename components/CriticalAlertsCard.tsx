@@ -9,10 +9,10 @@ import { useAuthStore } from '@/stores/authStore';
 
 interface Alert {
   id: string;
+  entityId: string;
   type: 'overdue_invoice' | 'missed_deadline' | 'high_priority_task';
   title: string;
   subtitle: string;
-  route: string;
   icon: keyof typeof Ionicons.glyphMap;
   color: string;
 }
@@ -43,10 +43,10 @@ export function CriticalAlertsCard() {
     overdueInvoices?.forEach((inv) => {
       alertsList.push({
         id: `inv-${inv.id}`,
+        entityId: inv.id,
         type: 'overdue_invoice',
         title: `Invoice ${inv.invoice_number} is overdue`,
         subtitle: `$${inv.total?.toFixed(2) || '0'} due`,
-        route: '/(app)/invoices',
         icon: 'alert-circle',
         color: colors.error,
       });
@@ -64,30 +64,31 @@ export function CriticalAlertsCard() {
     overdueTasks?.forEach((task) => {
       alertsList.push({
         id: `task-${task.id}`,
+        entityId: task.id,
         type: 'high_priority_task',
         title: task.title,
         subtitle: 'High priority - past due',
-        route: '/(app)/tasks',
         icon: 'flame',
         color: colors.warning,
       });
     });
 
-    // Projects past deadline
+    // Projects past deadline (active projects whose stage isn't completed)
     const { data: missedProjects } = await supabase
       .from('projects')
       .select('id, name, deadline')
-      .neq('status', 'completed')
+      .eq('status', 'active')
+      .neq('project_stage', 'completed' as any)
       .lt('deadline', today)
       .limit(2);
 
     missedProjects?.forEach((proj) => {
       alertsList.push({
         id: `proj-${proj.id}`,
+        entityId: proj.id,
         type: 'missed_deadline',
         title: proj.name,
         subtitle: 'Past deadline',
-        route: '/(app)/projects',
         icon: 'time',
         color: colors.error,
       });
@@ -130,7 +131,15 @@ export function CriticalAlertsCard() {
         <TouchableOpacity
           key={alert.id}
           style={[styles.alertRow, { borderTopColor: colors.error + '15' }]}
-          onPress={() => router.push(alert.route as any)}
+          onPress={() => {
+            if (alert.type === 'overdue_invoice') {
+              router.push({ pathname: '/(app)/invoices', params: { id: alert.entityId } } as any);
+            } else if (alert.type === 'high_priority_task') {
+              router.push({ pathname: '/(app)/tasks', params: { id: alert.entityId } } as any);
+            } else if (alert.type === 'missed_deadline') {
+              router.push({ pathname: '/(app)/project-detail', params: { id: alert.entityId } } as any);
+            }
+          }}
         >
           <Ionicons name={alert.icon} size={16} color={alert.color} />
           <View style={styles.alertContent}>

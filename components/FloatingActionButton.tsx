@@ -111,7 +111,7 @@ export function FloatingActionButton() {
         id: 'project',
         icon: 'folder-outline',
         label: t('fab.newProject'),
-        color: colors.success,
+        color: colors.statusNew,
         onPress: () => {
           close();
           router.push({ pathname: '/(app)/projects', params: { create: 'true' } } as any);
@@ -131,7 +131,7 @@ export function FloatingActionButton() {
         id: 'invoice',
         icon: 'document-text-outline',
         label: t('fab.newInvoice'),
-        color: colors.statusNew,
+        color: colors.success,
         onPress: () => {
           close();
           router.push({ pathname: '/(app)/invoices', params: { create: 'true' } } as any);
@@ -234,7 +234,7 @@ export function FloatingActionButton() {
         style={[
           styles.fab,
           {
-            backgroundColor: colors.accent,
+            backgroundColor: colors.primary,
             ...Shadows.lg,
             transform: [{ rotate: fabRotation }],
           },
@@ -255,7 +255,7 @@ export function FloatingActionButton() {
 const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
-    bottom: 95,
+    bottom: 110,
     right: Spacing.lg,
     width: 56,
     height: 56,

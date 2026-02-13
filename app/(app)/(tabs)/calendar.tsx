@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,11 +13,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { secureLog } from '@/lib/security';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
-import { EmptyState, ListSkeleton, showToast } from '@/components';
+import { EmptyState, ListSkeleton } from '@/components';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
+import { useOfflineData } from '@/hooks/useOfflineData';
 
 interface CalendarEvent {
   id: string;
@@ -38,9 +38,6 @@ export default function CalendarScreen() {
   const { colors, isDark } = useTheme();
   const { t, locale } = useTranslations();
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('month');
@@ -97,8 +94,9 @@ export default function CalendarScreen() {
     year: 'numeric',
   });
 
-  const fetchData = useCallback(async () => {
-    try {
+  const { data: calendarData, loading, refreshing, refresh } = useOfflineData<CalendarEvent[]>(
+    'calendar_events',
+    async () => {
       const allEvents: CalendarEvent[] = [];
 
       // Fetch tasks with due dates
@@ -193,25 +191,12 @@ export default function CalendarScreen() {
         });
       });
 
-      setEvents(allEvents);
-    } catch (error) {
-      secureLog.error('Error fetching calendar data:', error);
-      showToast('error', t('common.error'));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [t, dateLocale]);
+      return allEvents;
+    },
+    { deps: [dateLocale] },
+  );
 
-  useEffect(() => {
-    setLoading(true);
-    fetchData();
-  }, [fetchData]);
-
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchData();
-  }, [fetchData]);
+  const events = calendarData ?? [];
 
   const triggerHaptic = useCallback(() => {
     if (Platform.OS !== 'web') {
@@ -234,12 +219,26 @@ export default function CalendarScreen() {
     triggerHaptic();
   };
 
+  const listRef = useRef<FlatList>(null);
+
   const goToToday = () => {
     const today = new Date();
     setCurrentDate(new Date(today.getFullYear(), today.getMonth(), 1));
     const todayStr = today.toISOString().split('T')[0];
     setSelectedDate(todayStr);
     triggerHaptic();
+
+    // In list view, scroll to today's section
+    if (viewMode === 'list' && listRef.current) {
+      const todayIndex = groupedUpcomingEvents.findIndex(g => g.date === todayStr);
+      if (todayIndex >= 0) {
+        setTimeout(() => {
+          listRef.current?.scrollToIndex({ index: todayIndex, animated: true, viewPosition: 0 });
+        }, 100);
+      } else {
+        listRef.current.scrollToOffset({ offset: 0, animated: true });
+      }
+    }
   };
 
   // Build event map for month view: date string -> events
@@ -462,6 +461,27 @@ export default function CalendarScreen() {
     );
   };
 
+  const renderCalendarGroup = useCallback(({ item: group }: { item: typeof groupedUpcomingEvents[0] }) => (
+    <View style={styles.listGroup}>
+      <View style={styles.listDateHeader}>
+        <Text
+          style={[
+            styles.listDateText,
+            { color: colors.text },
+            group.date === todayStr && { color: colors.primary },
+          ]}
+        >
+          {group.label}
+          {group.date === todayStr && ` — ${t('calendar.today')}`}
+        </Text>
+        <Text style={[styles.listDateCount, { color: colors.textTertiary }]}>
+          {group.events.length}
+        </Text>
+      </View>
+      {group.events.map((event) => renderEventCard(event))}
+    </View>
+  ), [colors, t, todayStr, renderEventCard]);
+
   // Legend
   const renderLegend = () => (
     <View style={[styles.legendRow, { borderTopColor: colors.border }]}>
@@ -548,7 +568,7 @@ export default function CalendarScreen() {
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            <RefreshControl refreshing={refreshing} onRefresh={refresh} />
           }
         >
           {/* Month Navigation */}
@@ -680,11 +700,12 @@ export default function CalendarScreen() {
       ) : (
         /* List View */
         <FlatList
+          ref={listRef}
           data={groupedUpcomingEvents}
           keyExtractor={(item) => item.date}
           contentContainerStyle={styles.listContent}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            <RefreshControl refreshing={refreshing} onRefresh={refresh} />
           }
           ListEmptyComponent={
             <EmptyState
@@ -693,26 +714,16 @@ export default function CalendarScreen() {
               description={t('calendar.noUpcomingDesc')}
             />
           }
-          renderItem={({ item: group }) => (
-            <View style={styles.listGroup}>
-              <View style={styles.listDateHeader}>
-                <Text
-                  style={[
-                    styles.listDateText,
-                    { color: colors.text },
-                    group.date === todayStr && { color: colors.primary },
-                  ]}
-                >
-                  {group.label}
-                  {group.date === todayStr && ` — ${t('calendar.today')}`}
-                </Text>
-                <Text style={[styles.listDateCount, { color: colors.textTertiary }]}>
-                  {group.events.length}
-                </Text>
-              </View>
-              {group.events.map((event) => renderEventCard(event))}
-            </View>
-          )}
+          removeClippedSubviews
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          initialNumToRender={10}
+          renderItem={renderCalendarGroup}
+          onScrollToIndexFailed={(info) => {
+            setTimeout(() => {
+              listRef.current?.scrollToIndex({ index: info.index, animated: true });
+            }, 300);
+          }}
         />
       )}
     </SafeAreaView>
