@@ -11,13 +11,14 @@ import {
 } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/hooks/useTheme';
 import { useNavigationBadges } from '@/hooks/useNavigationBadges';
 import { useTranslations } from '@/hooks/useTranslations';
 import { FloatingActionButton } from '@/components';
 import { Spacing, FontSizes, BorderRadius, Shadows } from '@/constants/theme';
 
-const TAB_BAR_HEIGHT = 92;
+const TAB_BAR_CONTENT_HEIGHT = 60;
 
 interface MoreItem {
   id: string;
@@ -30,6 +31,9 @@ interface MoreItem {
 export default function TabsLayout() {
   const { counts } = useNavigationBadges();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const bottomPadding = Math.max(insets.bottom, 8);
+  const tabBarHeight = TAB_BAR_CONTENT_HEIGHT + bottomPadding;
   const { t } = useTranslations();
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -205,9 +209,10 @@ export default function TabsLayout() {
           tabBarStyle: {
             backgroundColor: colors.surface,
             borderTopColor: colors.border,
-            height: TAB_BAR_HEIGHT,
-            paddingBottom: 32,
+            height: tabBarHeight,
+            paddingBottom: bottomPadding,
             paddingTop: 10,
+            paddingHorizontal: Spacing.md,
           },
           tabBarLabelStyle: {
             fontSize: 11,
@@ -305,6 +310,7 @@ export default function TabsLayout() {
           style={[
             styles.overlay,
             {
+              bottom: tabBarHeight,
               backgroundColor: colors.overlay,
               opacity: overlayOpacity,
             },
@@ -321,6 +327,7 @@ export default function TabsLayout() {
           style={[
             styles.panel,
             {
+              bottom: tabBarHeight,
               backgroundColor: colors.surface,
               borderTopColor: colors.border,
               transform: [{ translateY: panelTranslateY }],
@@ -379,7 +386,7 @@ export default function TabsLayout() {
         </Animated.View>
       )}
 
-      <FloatingActionButton />
+      <FloatingActionButton tabBarHeight={tabBarHeight} />
     </View>
   );
 }
@@ -390,14 +397,12 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    bottom: TAB_BAR_HEIGHT,
     zIndex: 15,
   },
   panel: {
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: TAB_BAR_HEIGHT,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopLeftRadius: BorderRadius['2xl'],
     borderTopRightRadius: BorderRadius['2xl'],

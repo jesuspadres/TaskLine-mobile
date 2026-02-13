@@ -23,7 +23,11 @@ interface FABAction {
   onPress: () => void;
 }
 
-export function FloatingActionButton() {
+interface FloatingActionButtonProps {
+  tabBarHeight?: number;
+}
+
+export function FloatingActionButton({ tabBarHeight = 92 }: FloatingActionButtonProps) {
   const { colors } = useTheme();
   const { t } = useTranslations();
   const router = useRouter();
@@ -234,6 +238,7 @@ export function FloatingActionButton() {
         style={[
           styles.fab,
           {
+            bottom: tabBarHeight + Spacing.md,
             backgroundColor: colors.primary,
             ...Shadows.lg,
             transform: [{ rotate: fabRotation }],
@@ -255,7 +260,6 @@ export function FloatingActionButton() {
 const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
-    bottom: 110,
     right: Spacing.lg,
     width: 56,
     height: 56,
