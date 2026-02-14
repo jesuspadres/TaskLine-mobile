@@ -57,9 +57,57 @@ Mobile source: `c:\Users\jezzi\OneDrive\Documents\taskline-mobile\taskline-mobil
 ---
 
 ## Auth Screens
-- [ ] Login — `app/(auth)/login.tsx` — skipped for now
-- [ ] Sign Up — `app/(auth)/signup.tsx` — skipped for now
-- [ ] Forgot Password — `app/(auth)/forgot-password.tsx` — skipped for now
+**Status: [x] DONE (v2 — Full Redesign)**
+
+### Welcome Page — `app/(auth)/welcome.tsx` (NEW)
+- [x] New landing screen — first screen users see on cold launch
+- [x] TaskLine logo (`icon.png` Image), app title, tagline
+- [x] Two buttons: "Log In" (primary) and "Create Account" (outlined)
+- [x] Root entry (`app/index.tsx`) redirects to welcome instead of login
+- [x] Root layout auth guard redirects to welcome instead of login when logged out
+- [x] Registered in `app/(auth)/_layout.tsx`
+
+### Login — `app/(auth)/login.tsx`
+- [x] All hardcoded English strings replaced with `t()` i18n calls
+- [x] `Alert.alert` replaced with `showToast` for all error feedback
+- [x] Emoji 📋 replaced with actual TaskLine logo (`<Image source={require('@/assets/icon.png')}>`)
+- [x] NEW: Account lockout — 8 failed attempts triggers 10-minute lockout (stored in AsyncStorage)
+- [x] NEW: Progressive warning after 3 failed attempts showing remaining attempts
+- [x] NEW: Lockout countdown timer (auto-resets when expired)
+- [x] NEW: Disabled inputs during lockout with visual feedback
+- [x] NEW: Lockout/warning banners with icons
+- [x] NEW: "Remember me" checkbox — persists email to AsyncStorage
+- [x] NEW: Password visibility toggle (eye icon)
+- [x] NEW: Remember me + forgot password on same row
+- [x] Haptic feedback on login actions
+
+### Sign Up — `app/(auth)/signup.tsx` (MULTI-STEP REWRITE)
+- [x] Complete rewrite as 6-step onboarding flow (single component, `step` state)
+- [x] All strings use `t()` i18n calls
+- [x] Step progress bar + step counter ("Step 1 of 6")
+- [x] Back arrow navigation at every step
+- [x] **Step 0: Name** — Full name input, auto-focus, enter-to-continue
+- [x] **Step 1: Email** — Email input, auto-focus, enter-to-continue
+- [x] **Step 2: Password** — Password + confirm on same page, strength indicator (4-segment bar), requirement checklist (8+ chars, uppercase, lowercase, number), visibility toggles, mismatch detection
+- [x] **Step 3: Business Info** — Optional with "Skip" button in header. Business name, type (chip selector, 7 options), phone number
+- [x] **Step 4: Terms + Create** — Account summary card, terms checkbox, "Create Account" button. Calls `signUp()` directly (not auth store) to prevent premature dashboard redirect
+- [x] **Step 5: Plans** — Billing period toggle (monthly/annual), 4 plan cards with pricing, top features, "Show more" accordion for full feature list, "Continue Free" or "Get Started" (opens Stripe checkout for paid plans)
+- [x] Business info saved to `profiles` table via upsert after signup
+- [x] Session stored in local state until user finishes plans step — only then sets auth store (triggers dashboard redirect)
+- [x] Email verification banner shown when no session available
+- [x] Haptic feedback + success notification
+- [x] `keyboardDismissMode="on-drag"` on ScrollView
+
+### Forgot Password — `app/(auth)/forgot-password.tsx`
+- [x] `useTranslations()` hook added (was completely missing)
+- [x] All hardcoded English strings replaced with `t()` i18n calls
+- [x] `Alert.alert` replaced with `showToast` for error feedback
+- [x] Haptic feedback on reset action + success notification
+- [x] Success state uses i18n keys
+
+### i18n Keys Added
+- [x] ~70 new keys total in en.json and es.json (`auth` namespace)
+- [x] Keys cover: welcome page, onboarding steps, lockout, password strength, business info, plans comparison, forgot password flow
 
 ## Dashboard — `app/(app)/(tabs)/dashboard.tsx`
 **Status: [x] DONE**
@@ -167,7 +215,11 @@ Mobile source: `c:\Users\jezzi\OneDrive\Documents\taskline-mobile\taskline-mobil
 - [x] Added ~35 i18n keys to en.json and es.json (`calendar` namespace)
 
 ## More Menu — `app/(app)/(tabs)/more.tsx`
-- [ ] Not started — need to compare with website
+**Status: [x] DONE (already met all conventions)**
+- [x] All strings use `t()` i18n calls
+- [x] Uses `useTheme()` properly
+- [x] No `console.log`, `Alert.alert`, or `ActivityIndicator`
+- [x] Navigation to Projects, Tasks, Invoices, Properties, Settings with badge counts
 
 ## Projects — `app/(app)/projects.tsx`
 **Status: [x] DONE**
@@ -291,7 +343,7 @@ Mobile source: `c:\Users\jezzi\OneDrive\Documents\taskline-mobile\taskline-mobil
 - [x] Added ~45 i18n keys to en.json and es.json (`properties` namespace)
 
 ## Notifications — `app/(app)/notifications.tsx`
-**Status: [~] Partially improved**
+**Status: [x] DONE**
 
 ### Improvements Made
 - [x] All hardcoded English strings replaced with `t()` i18n calls
@@ -301,9 +353,10 @@ Mobile source: `c:\Users\jezzi\OneDrive\Documents\taskline-mobile\taskline-mobil
 - [x] Route mapping: request→request-detail, booking→booking-detail, project→project-detail, client→client-detail, invoice→invoices, task→tasks
 - [x] Fallback toast when no route available
 - [x] Empty state differentiates "all" vs "unread" filters
-
-### Still TODO
-- [ ] Compare full feature set with website notifications page
+- [x] Uses `showToast()` for feedback, `ConfirmDialog` for destructive actions
+- [x] No `console.log`, `Alert.alert`, or `ActivityIndicator`
+- [x] Real-time subscription, pull-to-refresh, animated filter panel
+- [x] Feature parity with website (all/unread filters, mark read, mark all read, archive, clear all)
 
 ## App Store Compliance — Deployment Readiness
 **Status: [x] DONE (Phase 1)**

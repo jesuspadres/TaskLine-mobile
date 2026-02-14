@@ -61,9 +61,9 @@ export async function websiteApiFetch(path: string, options?: RequestInit): Prom
 
 /**
  * Create a Stripe Checkout session for subscribing to a plan.
- * Returns the Stripe Checkout URL.
+ * Returns the Stripe Checkout URL and session ID.
  */
-export async function createCheckoutSession(tier: string, interval: 'month' | 'year'): Promise<string> {
+export async function createCheckoutSession(tier: string, interval: 'month' | 'year'): Promise<{ url: string; sessionId: string }> {
   const res = await websiteApiFetch('/api/stripe/create-checkout-session', {
     method: 'POST',
     body: JSON.stringify({ tier, interval }),
@@ -75,7 +75,7 @@ export async function createCheckoutSession(tier: string, interval: 'month' | 'y
   }
 
   const data = await res.json();
-  if (data.url) return data.url;
+  if (data.url) return { url: data.url, sessionId: data.sessionId };
   throw new Error('No checkout URL returned');
 }
 
@@ -134,4 +134,38 @@ export async function createConnectDashboardSession(): Promise<string> {
   const data = await res.json();
   if (data.url) return data.url;
   throw new Error('No dashboard URL returned');
+}
+
+/**
+ * Sync the user's Stripe subscription to the database.
+ * This is a fallback for when the Stripe webhook hasn't processed yet.
+ * Pass `checkoutSessionId` for the most reliable lookup.
+ * Returns the current tier slug and subscription status.
+ */
+export async function syncSubscription(checkoutSessionId?: string): Promise<{ tier: string; status?: string; synced: boolean }> {
+  const res = await websiteApiFetch('/api/subscription/sync', {
+    method: 'POST',
+    body: JSON.stringify({ checkoutSessionId }),
+  });
+
+  if (!res.ok) {
+    return { tier: 'free', synced: false };
+  }
+
+  return res.json();
+}
+
+/**
+ * Delete the current user's account and all associated data.
+ * Calls the website API which uses the service role to remove the auth user.
+ */
+export async function deleteAccount(): Promise<void> {
+  const res = await websiteApiFetch('/api/account/delete', {
+    method: 'POST',
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Account deletion failed (${res.status})`);
+  }
 }

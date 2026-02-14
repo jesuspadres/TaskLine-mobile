@@ -11,9 +11,12 @@ export default function AuthLayout() {
         contentStyle: { backgroundColor: colors.background },
       }}
     >
+      <Stack.Screen name="welcome" />
       <Stack.Screen name="login" />
       <Stack.Screen name="signup" />
       <Stack.Screen name="forgot-password" />
+      <Stack.Screen name="terms-of-service" />
+      <Stack.Screen name="privacy-policy" />
     </Stack>
   );
 }

@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useAuthStore } from '@/stores/authStore';
 import { useThemeStore } from '@/stores/themeStore';
+import { useSubscriptionStore } from '@/stores/subscriptionStore';
 import { useTheme } from '@/hooks/useTheme';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { ToastProvider } from '@/components/Toast';
@@ -13,6 +14,8 @@ import { OfflineBanner } from '@/components/OfflineBanner';
 export default function RootLayout() {
   const { user, loading, initialized, initialize } = useAuthStore();
   const initializeTheme = useThemeStore((s) => s.initialize);
+  const initializeSubscription = useSubscriptionStore((s) => s.initialize);
+  const clearSubscription = useSubscriptionStore((s) => s.clear);
   const { colors, isDark } = useTheme();
   const segments = useSegments();
   const router = useRouter();
@@ -25,13 +28,22 @@ export default function RootLayout() {
     initializeTheme();
   }, []);
 
+  // Initialize subscription when user logs in, clear on logout
+  useEffect(() => {
+    if (user) {
+      initializeSubscription(user.id);
+    } else if (initialized) {
+      clearSubscription();
+    }
+  }, [user]);
+
   useEffect(() => {
     if (!initialized) return;
 
     const inAuthGroup = segments[0] === '(auth)';
 
     if (!user && !inAuthGroup) {
-      router.replace('/(auth)/login');
+      router.replace('/(auth)/welcome');
     } else if (user && inAuthGroup) {
       router.replace('/(app)/dashboard');
     }

@@ -100,7 +100,7 @@ export default function PlansScreen() {
     setCheckoutLoading(true);
     try {
       const interval = billingPeriod === 'annual' ? 'year' : 'month';
-      const url = await createCheckoutSession(plan.slug, interval);
+      const { url } = await createCheckoutSession(plan.slug, interval);
       await Linking.openURL(url);
     } catch (error: any) {
       secureLog.error('Checkout error:', error.message);

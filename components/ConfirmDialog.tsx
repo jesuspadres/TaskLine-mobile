@@ -124,8 +124,10 @@ const styles = StyleSheet.create({
   button: {
     flex: 1,
     paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.sm,
     borderRadius: BorderRadius.lg,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   cancelButton: {
     borderWidth: 1,
@@ -134,5 +136,6 @@ const styles = StyleSheet.create({
   buttonText: {
     fontSize: FontSizes.md,
     fontWeight: '600',
+    textAlign: 'center',
   },
 });

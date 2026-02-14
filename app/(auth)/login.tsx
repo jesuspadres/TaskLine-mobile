@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,38 +9,148 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
-  Alert,
+  Image,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '@/stores/authStore';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
+import { useTranslations } from '@/hooks/useTranslations';
+import { showToast } from '@/components';
+import { useHaptics } from '@/hooks/useHaptics';
+import { ImpactFeedbackStyle } from 'expo-haptics';
+
+const MAX_ATTEMPTS = 8;
+const LOCKOUT_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+const WARNING_THRESHOLD = 3;
+const LOCKOUT_STORAGE_KEY = '@taskline_login_lockout';
+const REMEMBER_EMAIL_KEY = '@taskline_remember_email';
+
+interface LockoutData {
+  attempts: number;
+  firstAttemptAt: number;
+  lockedUntil: number | null;
+}
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
+  const [lockoutData, setLockoutData] = useState<LockoutData>({ attempts: 0, firstAttemptAt: 0, lockedUntil: null });
+  const [lockoutTimeLeft, setLockoutTimeLeft] = useState(0);
   const { login } = useAuthStore();
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
+  const { t } = useTranslations();
   const router = useRouter();
+  const { impact } = useHaptics();
+
+  // Load saved email and lockout data on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const savedEmail = await AsyncStorage.getItem(REMEMBER_EMAIL_KEY);
+        if (savedEmail) {
+          setEmail(savedEmail);
+          setRememberMe(true);
+        }
+        const lockoutRaw = await AsyncStorage.getItem(LOCKOUT_STORAGE_KEY);
+        if (lockoutRaw) {
+          const data: LockoutData = JSON.parse(lockoutRaw);
+          // Reset if lockout expired
+          if (data.lockedUntil && Date.now() > data.lockedUntil) {
+            await AsyncStorage.removeItem(LOCKOUT_STORAGE_KEY);
+          } else {
+            setLockoutData(data);
+          }
+        }
+      } catch {}
+    })();
+  }, []);
+
+  // Countdown timer for lockout
+  useEffect(() => {
+    if (!lockoutData.lockedUntil) {
+      setLockoutTimeLeft(0);
+      return;
+    }
+    const remaining = lockoutData.lockedUntil - Date.now();
+    if (remaining <= 0) {
+      setLockoutData({ attempts: 0, firstAttemptAt: 0, lockedUntil: null });
+      AsyncStorage.removeItem(LOCKOUT_STORAGE_KEY);
+      setLockoutTimeLeft(0);
+      return;
+    }
+    setLockoutTimeLeft(remaining);
+    const interval = setInterval(() => {
+      const left = (lockoutData.lockedUntil ?? 0) - Date.now();
+      if (left <= 0) {
+        setLockoutData({ attempts: 0, firstAttemptAt: 0, lockedUntil: null });
+        AsyncStorage.removeItem(LOCKOUT_STORAGE_KEY);
+        setLockoutTimeLeft(0);
+        clearInterval(interval);
+      } else {
+        setLockoutTimeLeft(left);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [lockoutData.lockedUntil]);
+
+  const isLockedOut = lockoutTimeLeft > 0;
+  const attemptsRemaining = MAX_ATTEMPTS - lockoutData.attempts;
+  const showWarning = lockoutData.attempts >= WARNING_THRESHOLD && !isLockedOut;
+
+  const recordFailedAttempt = useCallback(async () => {
+    const now = Date.now();
+    const newAttempts = lockoutData.attempts + 1;
+    const newData: LockoutData = {
+      attempts: newAttempts,
+      firstAttemptAt: lockoutData.firstAttemptAt || now,
+      lockedUntil: newAttempts >= MAX_ATTEMPTS ? now + LOCKOUT_DURATION_MS : null,
+    };
+    setLockoutData(newData);
+    await AsyncStorage.setItem(LOCKOUT_STORAGE_KEY, JSON.stringify(newData));
+  }, [lockoutData]);
 
   const handleLogin = async () => {
+    if (isLockedOut) {
+      const mins = Math.ceil(lockoutTimeLeft / 60000);
+      showToast('error', t('auth.accountLockedMessage', { minutes: mins }));
+      return;
+    }
+
     if (!email || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+      showToast('error', t('auth.fillAllFields'));
       return;
     }
 
     setLoading(true);
+    impact(ImpactFeedbackStyle.Light);
     const { error } = await login(email, password);
     setLoading(false);
 
     if (error) {
-      Alert.alert('Login Failed', error.message);
+      await recordFailedAttempt();
+      showToast('error', error.message);
     } else {
+      // Clear lockout on success
+      await AsyncStorage.removeItem(LOCKOUT_STORAGE_KEY);
+      // Save or clear remembered email
+      if (rememberMe) {
+        await AsyncStorage.setItem(REMEMBER_EMAIL_KEY, email);
+      } else {
+        await AsyncStorage.removeItem(REMEMBER_EMAIL_KEY);
+      }
+      impact(ImpactFeedbackStyle.Medium);
       router.replace('/(app)/dashboard');
     }
   };
+
+  const lockoutMinutes = Math.ceil(lockoutTimeLeft / 60000);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -54,67 +164,114 @@ export default function LoginScreen() {
         >
           {/* Logo & Header */}
           <View style={styles.header}>
-            <View style={[styles.logoContainer, { backgroundColor: colors.primary }]}>
-              <Text style={styles.logoIcon}>📋</Text>
-            </View>
+            <Image source={require('@/assets/icon.png')} style={styles.logoImage} />
             <Text style={[styles.title, { color: colors.text }]}>TaskLine</Text>
-            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Welcome back! Sign in to continue</Text>
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{t('auth.welcomeBack')}</Text>
           </View>
+
+          {/* Lockout Warning */}
+          {isLockedOut && (
+            <View style={[styles.lockoutBanner, { backgroundColor: colors.errorLight || '#fef2f2' }]}>
+              <Ionicons name="lock-closed" size={20} color={colors.error} />
+              <Text style={[styles.lockoutText, { color: colors.error }]}>
+                {t('auth.accountLockedMessage', { minutes: lockoutMinutes })}
+              </Text>
+            </View>
+          )}
+
+          {/* Attempts Warning */}
+          {showWarning && (
+            <View style={[styles.warningBanner, { backgroundColor: colors.warningLight || '#fffbeb' }]}>
+              <Ionicons name="warning" size={18} color={colors.warning || '#f59e0b'} />
+              <Text style={[styles.warningText, { color: colors.warning || '#f59e0b' }]}>
+                {t('auth.attemptsWarning', { count: attemptsRemaining })}
+              </Text>
+            </View>
+          )}
 
           {/* Form */}
           <View style={styles.form}>
             <View style={styles.inputGroup}>
-              <Text style={[styles.label, { color: colors.text }]}>Email</Text>
+              <Text style={[styles.label, { color: colors.text }]}>{t('auth.email')}</Text>
               <TextInput
-                style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-                placeholder="you@example.com"
+                style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }, isLockedOut && styles.inputDisabled]}
+                placeholder={t('auth.emailPlaceholder')}
                 placeholderTextColor={colors.textTertiary}
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoComplete="email"
+                editable={!isLockedOut}
               />
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={[styles.label, { color: colors.text }]}>Password</Text>
-              <TextInput
-                style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-                placeholder="••••••••"
-                placeholderTextColor={colors.textTertiary}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-                autoComplete="password"
-              />
+              <Text style={[styles.label, { color: colors.text }]}>{t('auth.password')}</Text>
+              <View style={styles.passwordContainer}>
+                <TextInput
+                  style={[styles.input, styles.passwordInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }, isLockedOut && styles.inputDisabled]}
+                  placeholder={t('auth.passwordPlaceholder')}
+                  placeholderTextColor={colors.textTertiary}
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry={!showPassword}
+                  autoComplete="password"
+                  editable={!isLockedOut}
+                />
+                <TouchableOpacity
+                  style={styles.eyeButton}
+                  onPress={() => setShowPassword(!showPassword)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={20} color={colors.textTertiary} />
+                </TouchableOpacity>
+              </View>
             </View>
 
-            <Link href="/(auth)/forgot-password" asChild>
-              <TouchableOpacity style={styles.forgotPassword}>
-                <Text style={[styles.forgotPasswordText, { color: colors.primary }]}>Forgot password?</Text>
+            {/* Remember Me + Forgot Password Row */}
+            <View style={styles.optionsRow}>
+              <TouchableOpacity
+                style={styles.rememberRow}
+                onPress={() => setRememberMe(!rememberMe)}
+                activeOpacity={0.7}
+              >
+                <View style={[
+                  styles.checkbox,
+                  { borderColor: rememberMe ? colors.primary : colors.border },
+                  rememberMe && { backgroundColor: colors.primary },
+                ]}>
+                  {rememberMe && <Ionicons name="checkmark" size={14} color="#fff" />}
+                </View>
+                <Text style={[styles.rememberText, { color: colors.textSecondary }]}>{t('auth.rememberMe')}</Text>
               </TouchableOpacity>
-            </Link>
+
+              <Link href="/(auth)/forgot-password" asChild>
+                <TouchableOpacity>
+                  <Text style={[styles.forgotPasswordText, { color: colors.primary }]}>{t('auth.forgotPassword')}</Text>
+                </TouchableOpacity>
+              </Link>
+            </View>
 
             <TouchableOpacity
-              style={[styles.button, { backgroundColor: colors.primary }, loading && styles.buttonDisabled]}
+              style={[styles.button, { backgroundColor: colors.primary }, (loading || isLockedOut) && styles.buttonDisabled]}
               onPress={handleLogin}
-              disabled={loading}
+              disabled={loading || isLockedOut}
             >
               {loading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.buttonText}>Sign In</Text>
+                <Text style={styles.buttonText}>{t('auth.login')}</Text>
               )}
             </TouchableOpacity>
           </View>
 
           {/* Footer */}
           <View style={styles.footer}>
-            <Text style={[styles.footerText, { color: colors.textSecondary }]}>Don't have an account? </Text>
+            <Text style={[styles.footerText, { color: colors.textSecondary }]}>{t('auth.noAccount')} </Text>
             <Link href="/(auth)/signup" asChild>
               <TouchableOpacity>
-                <Text style={[styles.footerLink, { color: colors.primary }]}>Sign up</Text>
+                <Text style={[styles.footerLink, { color: colors.primary }]}>{t('auth.signup')}</Text>
               </TouchableOpacity>
             </Link>
           </View>
@@ -138,18 +295,13 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    marginBottom: Spacing['4xl'],
+    marginBottom: Spacing['3xl'],
   },
-  logoContainer: {
-    width: 80,
-    height: 80,
+  logoImage: {
+    width: 72,
+    height: 72,
     borderRadius: BorderRadius.xl,
-    justifyContent: 'center',
-    alignItems: 'center',
     marginBottom: Spacing.lg,
-  },
-  logoIcon: {
-    fontSize: 40,
   },
   title: {
     fontSize: FontSizes['3xl'],
@@ -158,6 +310,32 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: FontSizes.md,
+  },
+  lockoutBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    marginBottom: Spacing.lg,
+  },
+  lockoutText: {
+    flex: 1,
+    fontSize: FontSizes.sm,
+    fontWeight: '500',
+  },
+  warningBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    marginBottom: Spacing.lg,
+  },
+  warningText: {
+    flex: 1,
+    fontSize: FontSizes.sm,
+    fontWeight: '500',
   },
   form: {
     marginBottom: Spacing['3xl'],
@@ -177,9 +355,43 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
     fontSize: FontSizes.md,
   },
-  forgotPassword: {
-    alignSelf: 'flex-end',
+  inputDisabled: {
+    opacity: 0.5,
+  },
+  passwordContainer: {
+    position: 'relative',
+  },
+  passwordInput: {
+    paddingRight: 48,
+  },
+  eyeButton: {
+    position: 'absolute',
+    right: Spacing.md,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+  },
+  optionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: Spacing.xl,
+  },
+  rememberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  rememberText: {
+    fontSize: FontSizes.sm,
   },
   forgotPasswordText: {
     fontSize: FontSizes.sm,

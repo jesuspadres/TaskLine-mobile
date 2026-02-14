@@ -682,7 +682,7 @@ export default function DashboardScreen() {
               <Text style={[styles.todayEmptyText, { color: colors.textSecondary }]}>{t('dashboard.noRecentInvoices')}</Text>
               <TouchableOpacity
                 style={[styles.emptyActionBtn, { borderColor: colors.primary }]}
-                onPress={() => router.push('/(app)/invoices' as any)}
+                onPress={() => router.push({ pathname: '/(app)/invoices', params: { create: 'true' } } as any)}
               >
                 <Text style={[styles.emptyActionText, { color: colors.primary }]}>{t('dashboard.createInvoice')}</Text>
               </TouchableOpacity>

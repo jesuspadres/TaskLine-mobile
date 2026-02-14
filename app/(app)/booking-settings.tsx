@@ -164,9 +164,9 @@ export default function BookingSettingsScreen() {
   const { user } = useAuthStore();
   const { colors } = useTheme();
   const { t } = useTranslations();
-  const { isPlus, isBusiness, loading: subLoading } = useSubscription();
+  const { isPro, isPlus, isBusiness, loading: subLoading } = useSubscription();
 
-  const canAccessBookings = isPlus || isBusiness;
+  const canAccessBookings = isPro || isPlus || isBusiness;
 
   // ── State ──────────────────────────────────────────────────────────
 

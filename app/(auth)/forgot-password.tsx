@@ -9,7 +9,6 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,27 +16,35 @@ import { Ionicons } from '@expo/vector-icons';
 import { resetPassword } from '@/lib/supabase';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
+import { useTranslations } from '@/hooks/useTranslations';
+import { showToast } from '@/components';
+import { useHaptics } from '@/hooks/useHaptics';
+import { ImpactFeedbackStyle, NotificationFeedbackType } from 'expo-haptics';
 
 export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
+  const { t } = useTranslations();
   const router = useRouter();
+  const { impact, notification } = useHaptics();
 
   const handleResetPassword = async () => {
     if (!email) {
-      Alert.alert('Error', 'Please enter your email address');
+      showToast('error', t('auth.enterEmail'));
       return;
     }
 
     setLoading(true);
+    impact(ImpactFeedbackStyle.Light);
     const { error } = await resetPassword(email);
     setLoading(false);
 
     if (error) {
-      Alert.alert('Error', error.message);
+      showToast('error', error.message);
     } else {
+      notification(NotificationFeedbackType.Success);
       setSent(true);
     }
   };
@@ -49,19 +56,20 @@ export default function ForgotPasswordScreen() {
           <View style={[styles.successIcon, { backgroundColor: colors.infoLight }]}>
             <Ionicons name="mail" size={48} color={colors.primary} />
           </View>
-          <Text style={[styles.successTitle, { color: colors.text }]}>Check your email</Text>
+          <Text style={[styles.successTitle, { color: colors.text }]}>{t('auth.checkYourEmail')}</Text>
           <Text style={[styles.successText, { color: colors.textSecondary }]}>
-            We've sent a password reset link to{'\n'}
+            {t('auth.resetLinkSentTo')}{'\n'}
             <Text style={[styles.emailText, { color: colors.text }]}>{email}</Text>
           </Text>
           <Text style={[styles.helpText, { color: colors.textTertiary }]}>
-            Didn't receive the email? Check your spam folder or try again with a different email.
+            {t('auth.didntReceiveEmail')}
           </Text>
-          <Link href="/(auth)/login" asChild>
-            <TouchableOpacity style={[styles.button, { backgroundColor: colors.primary }]}>
-              <Text style={styles.buttonText}>Back to Sign In</Text>
-            </TouchableOpacity>
-          </Link>
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: colors.primary }]}
+            onPress={() => router.replace('/(auth)/login')}
+          >
+            <Text style={styles.buttonText}>{t('auth.backToSignIn')}</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -89,19 +97,19 @@ export default function ForgotPasswordScreen() {
             <View style={[styles.iconContainer, { backgroundColor: colors.infoLight }]}>
               <Ionicons name="key-outline" size={40} color={colors.primary} />
             </View>
-            <Text style={[styles.title, { color: colors.text }]}>Forgot Password?</Text>
+            <Text style={[styles.title, { color: colors.text }]}>{t('auth.forgotPasswordTitle')}</Text>
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-              Enter your email address and we'll send you a link to reset your password.
+              {t('auth.forgotPasswordSubtitle')}
             </Text>
           </View>
 
           {/* Form */}
           <View style={styles.form}>
             <View style={styles.inputGroup}>
-              <Text style={[styles.label, { color: colors.text }]}>Email</Text>
+              <Text style={[styles.label, { color: colors.text }]}>{t('auth.email')}</Text>
               <TextInput
                 style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-                placeholder="you@example.com"
+                placeholder={t('auth.emailPlaceholder')}
                 placeholderTextColor={colors.textTertiary}
                 value={email}
                 onChangeText={setEmail}
@@ -119,17 +127,17 @@ export default function ForgotPasswordScreen() {
               {loading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.buttonText}>Send Reset Link</Text>
+                <Text style={styles.buttonText}>{t('auth.sendReset')}</Text>
               )}
             </TouchableOpacity>
           </View>
 
           {/* Footer */}
           <View style={styles.footer}>
-            <Text style={[styles.footerText, { color: colors.textSecondary }]}>Remember your password? </Text>
+            <Text style={[styles.footerText, { color: colors.textSecondary }]}>{t('auth.rememberPassword')} </Text>
             <Link href="/(auth)/login" asChild>
               <TouchableOpacity>
-                <Text style={[styles.footerLink, { color: colors.primary }]}>Sign in</Text>
+                <Text style={[styles.footerLink, { color: colors.primary }]}>{t('auth.login')}</Text>
               </TouchableOpacity>
             </Link>
           </View>

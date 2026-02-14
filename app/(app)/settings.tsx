@@ -29,7 +29,7 @@ import { ENV } from '@/lib/env';
 import { getPlan } from '@/lib/plans';
 import { showToast } from '@/components';
 import { ConfirmDialog } from '@/components';
-import { createFoundingLockInSession } from '@/lib/websiteApi';
+import { createFoundingLockInSession, deleteAccount } from '@/lib/websiteApi';
 import { secureLog } from '@/lib/security';
 
 interface SettingItem {
@@ -76,12 +76,6 @@ export default function SettingsScreen() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileName, setProfileName] = useState(
     user?.user_metadata?.name || ''
-  );
-  const [profileCompanyName, setProfileCompanyName] = useState(
-    user?.user_metadata?.company_name || ''
-  );
-  const [profilePhone, setProfilePhone] = useState(
-    user?.user_metadata?.phone || ''
   );
 
   // Change email modal state
@@ -252,8 +246,6 @@ export default function SettingsScreen() {
 
   const openProfileModal = () => {
     setProfileName(user?.user_metadata?.name || '');
-    setProfileCompanyName(user?.user_metadata?.company_name || '');
-    setProfilePhone(user?.user_metadata?.phone || '');
     setShowProfileModal(true);
   };
 
@@ -263,8 +255,6 @@ export default function SettingsScreen() {
       const { error } = await supabase.auth.updateUser({
         data: {
           name: profileName.trim(),
-          company_name: profileCompanyName.trim(),
-          phone: profilePhone.trim(),
         },
       });
 
@@ -349,25 +339,13 @@ export default function SettingsScreen() {
       });
       if (signInError) throw new Error(t('settings.invalidPassword'));
 
-      // Call server-side account deletion RPC
-      const { error: deleteError } = await (supabase.rpc as any)('delete_user_account', {
-        p_user_id: user?.id,
-      });
+      // Call website API to delete all data + auth user (uses service role key)
+      await deleteAccount();
 
-      if (deleteError) {
-        // If RPC doesn't exist, sign out and inform user
-        if (deleteError.message?.includes('function') || deleteError.code === '42883') {
-          // Fallback: sign out and direct user to web for full deletion
-          await logout();
-          router.replace('/(auth)/login');
-          return;
-        }
-        throw deleteError;
-      }
-
-      // Sign out after successful deletion
+      // Sign out locally after server-side deletion
       await logout();
-      router.replace('/(auth)/login');
+      showToast('success', t('settings.accountDeleted'));
+      router.replace('/(auth)/welcome');
     } catch (error: any) {
       showToast('error', error.message || t('settings.deleteAccountError'));
     } finally {
@@ -646,7 +624,7 @@ export default function SettingsScreen() {
           title: t('settings.helpCenter'),
           subtitle: t('settings.helpCenterSubtitle'),
           type: 'link',
-          onPress: () => Linking.openURL(`${ENV.APP_URL}/help`),
+          onPress: () => Linking.openURL(`${ENV.APP_URL}/en/help-center`),
         },
         {
           id: 'feedback',
@@ -654,7 +632,7 @@ export default function SettingsScreen() {
           title: t('settings.sendFeedback'),
           subtitle: t('settings.sendFeedbackSubtitle'),
           type: 'link',
-          onPress: () => Linking.openURL('mailto:support@solvrlabs.com?subject=TaskLine%20Mobile%20Feedback'),
+          onPress: () => Linking.openURL(`${ENV.APP_URL}/en/contact`),
         },
         {
           id: 'privacy',
@@ -801,9 +779,6 @@ export default function SettingsScreen() {
           <View style={styles.profileInfo}>
             <Text style={[styles.profileName, { color: colors.text }]}>{userName}</Text>
             <Text style={[styles.profileEmail, { color: colors.textSecondary }]}>{user?.email}</Text>
-            {user?.user_metadata?.company_name ? (
-              <Text style={[styles.profileCompany, { color: colors.textTertiary }]}>{user.user_metadata.company_name}</Text>
-            ) : null}
           </View>
           <Ionicons
             name="chevron-forward"
@@ -981,6 +956,7 @@ export default function SettingsScreen() {
         message={t('settings.deleteAccountWarning')}
         confirmLabel={t('settings.deleteAccountConfirmLabel')}
         cancelLabel={t('common.cancel')}
+        variant="danger"
         onConfirm={() => {
           setShowDeleteConfirm(false);
           setDeletePassword('');
@@ -1126,50 +1102,6 @@ export default function SettingsScreen() {
                 </View>
               </View>
 
-              {/* Company Name */}
-              <View style={styles.inputGroup}>
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Company Name</Text>
-                <View style={[styles.inputWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Ionicons
-                    name="business-outline"
-                    size={20}
-                    color={colors.textTertiary}
-                    style={styles.inputIcon}
-                  />
-                  <TextInput
-                    style={[styles.input, { color: colors.text }]}
-                    value={profileCompanyName}
-                    onChangeText={setProfileCompanyName}
-                    placeholder="Enter your company name"
-                    placeholderTextColor={colors.textTertiary}
-                    autoCapitalize="words"
-                    returnKeyType="next"
-                  />
-                </View>
-              </View>
-
-              {/* Phone */}
-              <View style={styles.inputGroup}>
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Phone</Text>
-                <View style={[styles.inputWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Ionicons
-                    name="call-outline"
-                    size={20}
-                    color={colors.textTertiary}
-                    style={styles.inputIcon}
-                  />
-                  <TextInput
-                    style={[styles.input, { color: colors.text }]}
-                    value={profilePhone}
-                    onChangeText={setProfilePhone}
-                    placeholder="Enter your phone number"
-                    placeholderTextColor={colors.textTertiary}
-                    keyboardType="phone-pad"
-                    returnKeyType="done"
-                  />
-                </View>
-              </View>
-
               {/* Email (read-only display) */}
               <View style={styles.inputGroup}>
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Email</Text>
@@ -1289,10 +1221,6 @@ const styles = StyleSheet.create({
   },
   profileEmail: {
     fontSize: FontSizes.sm,
-  },
-  profileCompany: {
-    fontSize: FontSizes.sm,
-    marginTop: 2,
   },
   section: {
     marginBottom: Spacing.xl,

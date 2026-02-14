@@ -7,6 +7,7 @@ interface AuthState {
   session: Session | null;
   loading: boolean;
   initialized: boolean;
+  suppressAuthChange: boolean;
 
   // Actions
   initialize: () => Promise<void>;
@@ -14,6 +15,7 @@ interface AuthState {
   register: (email: string, password: string, name?: string) => Promise<{ error: Error | null }>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  setSuppressAuthChange: (value: boolean) => void;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -21,6 +23,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   session: null,
   loading: true,
   initialized: false,
+  suppressAuthChange: false,
 
   initialize: async () => {
     try {
@@ -38,6 +41,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       // Listen for auth changes
       supabase.auth.onAuthStateChange((event, session) => {
+        // Skip if signup flow is suppressing auth changes (plans step not yet shown)
+        if (get().suppressAuthChange) return;
+
         if (session?.user) {
           set({ user: session.user, session });
         } else {
@@ -102,5 +108,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (user) {
       set({ user });
     }
+  },
+
+  setSuppressAuthChange: (value: boolean) => {
+    set({ suppressAuthChange: value });
   },
 }));

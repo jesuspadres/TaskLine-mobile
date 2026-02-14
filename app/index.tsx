@@ -1,7 +1,7 @@
 import { Redirect } from 'expo-router';
 
 export default function Index() {
-  // Redirect to the login screen by default
+  // Redirect to the welcome screen by default
   // The root layout will handle redirecting to dashboard if authenticated
-  return <Redirect href="/(auth)/login" />;
+  return <Redirect href="/(auth)/welcome" />;
 }
