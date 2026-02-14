@@ -36,7 +36,9 @@
       "WebFetch(domain:docs.expo.dev)",
       "WebFetch(domain:adapty.io)",
       "WebFetch(domain:docs.stripe.com)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(magick identify:*)",
+      "WebFetch(domain:taskline.solvrlabs.com)"
     ]
   }
 }

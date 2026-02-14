@@ -658,7 +658,7 @@ export default function SettingsScreen() {
           type: 'link',
           onPress: () => Alert.alert(
             'TaskLine Mobile',
-            'Version 1.0.0\n\n\u00A9 2025 Solvr Labs. All rights reserved.',
+            'Version 1.0.0\n\n\u00A9 2026 Solvr Labs. All rights reserved.',
             [{ text: 'OK' }]
           ),
         },
