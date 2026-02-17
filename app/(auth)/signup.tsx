@@ -10,9 +10,9 @@ import {
   ScrollView,
   ActivityIndicator,
   Image,
-  Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { signUp, supabase } from '@/lib/supabase';
@@ -233,7 +233,7 @@ export default function SignupScreen() {
       const interval = billingPeriod === 'annual' ? 'year' : 'month';
       const { url, sessionId } = await createCheckoutSession(plan.slug, interval);
       setStripeSessionId(sessionId);
-      await Linking.openURL(url);
+      await WebBrowser.openBrowserAsync(url);
       // Don't redirect — user stays on plans screen until they explicitly continue
       setCheckoutComplete(true);
     } catch (err: any) {
@@ -278,6 +278,7 @@ export default function SignupScreen() {
       {renderProgressBar()}
       <View style={[styles.stepBody, styles.centeredBody]}>
         <Image source={require('@/assets/icon.png')} style={styles.stepLogo} />
+
         <Text style={[styles.stepTitle, styles.centeredTitle, { color: colors.text }]}>{t('auth.whatsYourName')}</Text>
         <TextInput
           style={[styles.input, styles.centeredInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text, textAlign: 'center' }]}

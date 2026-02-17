@@ -275,8 +275,8 @@
     "hazards": "Hazards",
     "notes": "Notes",
     "editProperty": "Edit Property",
-    "deleteProperty": "Delete Property",
-    "deleteConfirm": "Delete \"%{name}\"? This cannot be undone.",
+    "deleteProperty": "Permanently Delete Property",
+    "deleteConfirm": "Permanently delete \"%{name}\"? This will remove the property and all its data. This cannot be undone.",
     "propertyUpdated": "Property updated",
     "propertyDeleted": "Property deleted",
     "nameRequired": "Property name is required",
@@ -402,6 +402,10 @@
     "selectProperty": "Select a Property",
     "createNewProperty": "Create New Property",
     "propertyLinked": "Location linked to project",
+    "unlinkProperty": "Remove Location",
+    "unlinkPropertyConfirm": "Remove \"%{name}\" from this project? The property won't be deleted.",
+    "unlink": "Remove",
+    "propertyUnlinked": "Location removed from project",
     "yourProperties": "Your Properties",
     "noPropertiesAvailable": "No properties yet. Create one to get started.",
     "workflow": "Workflow",
@@ -447,7 +451,8 @@
     "projectArchived": "Project archived",
     "approvalDesc": "Send an approval link to your client so they can review and approve this project.",
     "approvalShareMessage": "Please review and approve the project \"%{projectName}\" for %{clientName}:",
-    "awaitingClientApproval": "Awaiting client approval..."
+    "awaitingClientApproval": "Awaiting client approval...",
+    "viewOriginalRequest": "View Original Request"
   },
   "tasks": {
     "title": "Tasks",

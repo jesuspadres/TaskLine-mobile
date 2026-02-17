@@ -9,6 +9,13 @@ export const ENV = {
 
   // App Configuration
   APP_URL: 'https://taskline.solvrlabs.com',
+
+  // Google OAuth
+  GOOGLE_WEB_CLIENT_ID: 'your-google-web-client-id',
+
+  // Google Maps API Key
+  // Restrict in Google Cloud Console to your iOS bundle ID and Android package + SHA-1
+  GOOGLE_MAPS_API_KEY: 'your-google-maps-api-key',
 };
 
 // Validate environment

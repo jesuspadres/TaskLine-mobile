@@ -275,8 +275,8 @@
     "hazards": "Peligros",
     "notes": "Notas",
     "editProperty": "Editar propiedad",
-    "deleteProperty": "Eliminar propiedad",
-    "deleteConfirm": "Eliminar \"%{name}\"? Esta accion no se puede deshacer.",
+    "deleteProperty": "Eliminar propiedad permanentemente",
+    "deleteConfirm": "¿Eliminar permanentemente \"%{name}\"? Esto eliminará la propiedad y todos sus datos. Esta acción no se puede deshacer.",
     "propertyUpdated": "Propiedad actualizada",
     "propertyDeleted": "Propiedad eliminada",
     "nameRequired": "El nombre es obligatorio",
@@ -402,6 +402,10 @@
     "selectProperty": "Seleccionar una propiedad",
     "createNewProperty": "Crear nueva propiedad",
     "propertyLinked": "Ubicacion vinculada al proyecto",
+    "unlinkProperty": "Quitar ubicación",
+    "unlinkPropertyConfirm": "¿Quitar \"%{name}\" de este proyecto? La propiedad no se eliminará.",
+    "unlink": "Quitar",
+    "propertyUnlinked": "Ubicación quitada del proyecto",
     "yourProperties": "Tus propiedades",
     "noPropertiesAvailable": "Sin propiedades aun. Crea una para comenzar.",
     "workflow": "Flujo de trabajo",
@@ -447,7 +451,8 @@
     "projectArchived": "Proyecto archivado",
     "approvalDesc": "Envia un enlace de aprobacion a tu cliente para que pueda revisar y aprobar este proyecto.",
     "approvalShareMessage": "Por favor revisa y aprueba el proyecto \"%{projectName}\" para %{clientName}:",
-    "awaitingClientApproval": "Esperando aprobacion del cliente..."
+    "awaitingClientApproval": "Esperando aprobacion del cliente...",
+    "viewOriginalRequest": "Ver solicitud original"
   },
   "tasks": {
     "title": "Tareas",

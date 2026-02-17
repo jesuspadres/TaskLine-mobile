@@ -96,13 +96,10 @@ export default function ProjectDetailScreen() {
               .eq('id', projectResult.client_id)
               .single()
           : Promise.resolve({ data: null, error: null }),
-        projectResult.client_id
-          ? supabase
-              .from('properties')
-              .select('id, name, address_formatted, address_street, address_city, address_state')
-              .eq('client_id', projectResult.client_id)
-              .order('created_at', { ascending: false })
-          : Promise.resolve({ data: [], error: null }),
+        (supabase.from('project_properties') as any)
+          .select('property_id, properties:property_id(id, name, address_formatted, address_street, address_unit, address_city, address_state)')
+          .eq('project_id', id!)
+          .order('created_at', { ascending: false }),
       ]);
 
       return {
@@ -111,7 +108,7 @@ export default function ProjectDetailScreen() {
         tasks: ((tasksResult.data as Task[]) ?? []),
         invoices: ((invoicesResult.data as Invoice[]) ?? []),
         lineItems: ((lineItemsResult.data as ProjectLineItem[]) ?? []),
-        properties: ((propertiesResult.data as any) ?? []),
+        properties: ((propertiesResult.data as any[]) ?? []).map((row: any) => row.properties).filter(Boolean),
       };
     },
     { enabled: !!id },
@@ -269,17 +266,15 @@ export default function ProjectDetailScreen() {
   }, [user]);
 
   const handleLinkProperty = async (propertyId: string) => {
-    if (!project?.client_id) return;
+    if (!project || !user) return;
     setLinkingProperty(true);
     try {
-      const { error } = await mutate({
-        table: 'properties',
-        operation: 'update',
-        data: { client_id: project.client_id },
-        matchColumn: 'id',
-        matchValue: propertyId,
-        cacheKeys: [`project_detail:${id}`],
-      });
+      const { error } = await (supabase.from('project_properties') as any)
+        .upsert({
+          project_id: id!,
+          property_id: propertyId,
+          user_id: user.id,
+        }, { onConflict: 'project_id,property_id' });
 
       if (error) throw error;
       showToast('success', t('projectDetail.propertyLinked'));
@@ -291,6 +286,34 @@ export default function ProjectDetailScreen() {
     } finally {
       setLinkingProperty(false);
     }
+  };
+
+  const handleUnlinkProperty = (propertyId: string, propertyName: string) => {
+    Alert.alert(
+      t('projectDetail.unlinkProperty'),
+      t('projectDetail.unlinkPropertyConfirm', { name: propertyName }),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('projectDetail.unlink'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await (supabase.from('project_properties') as any)
+                .delete()
+                .eq('project_id', id!)
+                .eq('property_id', propertyId);
+              if (error) throw error;
+              showToast('success', t('projectDetail.propertyUnlinked'));
+              refresh();
+            } catch (error: any) {
+              secureLog.error('Error unlinking property:', error);
+              showToast('error', t('projectDetail.updateError'));
+            }
+          },
+        },
+      ]
+    );
   };
 
   const openLocationPicker = async () => {
@@ -873,6 +896,18 @@ export default function ProjectDetailScreen() {
             </TouchableOpacity>
           )}
 
+          {/* Original Request Link */}
+          {!!(project as any).request_id && (
+            <TouchableOpacity
+              style={styles.clientRow}
+              onPress={() => router.push({ pathname: '/(app)/request-detail', params: { id: (project as any).request_id } } as any)}
+            >
+              <Ionicons name="mail-outline" size={16} color={colors.primary} />
+              <Text style={[styles.clientName, { color: colors.primary }]}>{t('projectDetail.viewOriginalRequest')}</Text>
+              <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+            </TouchableOpacity>
+          )}
+
           {/* Description */}
           {project.description && (
             <Text style={[styles.description, { color: colors.textSecondary }]}>
@@ -933,6 +968,35 @@ export default function ProjectDetailScreen() {
           </View>
         </View>
 
+        {/* Approval Workflow */}
+        {client && project.approval_status !== 'approved' && (
+          <View style={[styles.workflowCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={styles.workflowHeader}>
+              <Ionicons name="shield-checkmark-outline" size={18} color={colors.text} />
+              <Text style={[styles.workflowTitle, { color: colors.text }]}>{t('projectDetail.workflow')}</Text>
+            </View>
+            <Text style={[styles.workflowDesc, { color: colors.textSecondary }]}>
+              {t('projectDetail.approvalDesc')}
+            </Text>
+            <TouchableOpacity
+              style={[styles.workflowButton, { backgroundColor: colors.primary }]}
+              onPress={handleSendApproval}
+            >
+              <Ionicons name="share-outline" size={18} color="#fff" />
+              <Text style={styles.workflowButtonText}>
+                {project.approval_status === 'pending'
+                  ? t('projectDetail.resendApproval')
+                  : t('projectDetail.sendApproval')}
+              </Text>
+            </TouchableOpacity>
+            {project.approval_status === 'pending' && (
+              <Text style={[styles.workflowStatusNote, { color: colors.warning }]}>
+                {t('projectDetail.awaitingClientApproval')}
+              </Text>
+            )}
+          </View>
+        )}
+
         {/* Project Location */}
         <View style={[styles.propertiesCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={styles.propertiesHeader}>
@@ -948,7 +1012,9 @@ export default function ProjectDetailScreen() {
           </View>
           {properties.length > 0 ? (
             properties.map((property, idx) => {
-              const address = property.address_formatted || [property.address_street, property.address_city, property.address_state].filter(Boolean).join(', ') || null;
+              const unit = (property as any).address_unit || null;
+              let address = property.address_formatted || [property.address_street, property.address_city, property.address_state].filter(Boolean).join(', ') || null;
+              if (address && unit && !address.includes(unit)) address = `${address}, ${unit}`;
 
               return (
                 <TouchableOpacity
@@ -981,7 +1047,16 @@ export default function ProjectDetailScreen() {
                         <Ionicons name="navigate-outline" size={14} color={colors.primary} />
                       </TouchableOpacity>
                     )}
-                    <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+                    <TouchableOpacity
+                      style={[styles.propertyUnlinkBtn, { backgroundColor: colors.surfaceSecondary }]}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleUnlinkProperty(property.id, property.name);
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Ionicons name="close-circle-outline" size={16} color={colors.textTertiary} />
+                    </TouchableOpacity>
                   </View>
                 </TouchableOpacity>
               );
@@ -993,34 +1068,6 @@ export default function ProjectDetailScreen() {
             </View>
           )}
         </View>
-
-        {/* Approval Workflow */}
-        {client && project.approval_status !== 'approved' && (
-          <View style={[styles.workflowCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <View style={styles.workflowHeader}>
-              <Ionicons name="shield-checkmark-outline" size={18} color={colors.text} />
-              <Text style={[styles.workflowTitle, { color: colors.text }]}>{t('projectDetail.workflow')}</Text>
-            </View>
-            <Text style={[styles.workflowDesc, { color: colors.textSecondary }]}>
-              {t('projectDetail.approvalDesc')}
-            </Text>
-            <TouchableOpacity
-              style={[styles.workflowButton, { backgroundColor: colors.primary }]}
-              onPress={handleSendApproval}
-            >
-              <Ionicons name="share-outline" size={18} color="#fff" />
-              <Text style={styles.workflowButtonText}>
-                {project.approval_status === 'pending'
-                  ? t('projectDetail.resendApproval')
-                  : t('projectDetail.sendApproval')}
-              </Text>
-            </TouchableOpacity>
-            {project.approval_status === 'pending' && (
-              <Text style={[styles.workflowStatusNote, { color: colors.warning }]}>
-                {t('projectDetail.awaitingClientApproval')}
-              </Text>
-            )}
-          </View>
         )}
 
         {/* Progress Bar */}
@@ -1480,7 +1527,9 @@ export default function ProjectDetailScreen() {
             allProperties
               .filter(p => !properties.some(cp => cp.id === p.id))
               .map((property) => {
-                const address = property.address_formatted || [property.address_street, property.address_city, property.address_state].filter(Boolean).join(', ') || null;
+                const pUnit = (property as any).address_unit || null;
+                let address = property.address_formatted || [property.address_street, property.address_city, property.address_state].filter(Boolean).join(', ') || null;
+                if (address && pUnit && !address.includes(pUnit)) address = `${address}, ${pUnit}`;
                 return (
                   <TouchableOpacity
                     key={property.id}
@@ -1801,6 +1850,13 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   propertyMapsBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: BorderRadius.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  propertyUnlinkBtn: {
     width: 28,
     height: 28,
     borderRadius: BorderRadius.md,

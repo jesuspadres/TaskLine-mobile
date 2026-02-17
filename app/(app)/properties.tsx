@@ -238,12 +238,22 @@ export default function PropertiesScreen() {
 
     setSaving(true);
     try {
+      // Build address_formatted from form fields
+      const addressParts = [
+        formData.address_line1.trim(),
+        formData.address_line2.trim(),
+        [formData.city.trim(), formData.state.trim()].filter(Boolean).join(', '),
+        formData.zip_code.trim(),
+      ].filter(Boolean);
+      const addressFormatted = addressParts.join(', ') || formData.name.trim();
+
       const newProperty: Record<string, any> = {
         user_id: user.id,
         client_id: formData.client_id,
         name: formData.name.trim(),
         property_type: formData.property_type || null,
         // Use website column names for address
+        address_formatted: addressFormatted,
         address_street: formData.address_line1.trim() || null,
         address_unit: formData.address_line2.trim() || null,
         address_city: formData.city.trim() || null,
@@ -293,11 +303,17 @@ export default function PropertiesScreen() {
 
   const getAddressString = (property: Property): string => {
     const p = property as any;
+    const unit = p.address_unit || p.address_line2 || null;
     // Try address_formatted first (set by website via Google Places)
-    if (p.address_formatted) return p.address_formatted as string;
+    if (p.address_formatted) {
+      // Append unit/apt if stored separately and not already in the formatted string
+      if (unit && !(p.address_formatted as string).includes(unit)) {
+        return `${p.address_formatted}, ${unit}`;
+      }
+      return p.address_formatted as string;
+    }
     // Fall back — prefer website columns, then old mobile columns
     const street = p.address_street || property.address_line1;
-    const unit = p.address_unit || p.address_line2;
     const city = p.address_city || property.city;
     const state = p.address_state || property.state;
     const zip = p.address_zip || property.zip_code;

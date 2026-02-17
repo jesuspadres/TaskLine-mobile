@@ -248,11 +248,17 @@ export default function PropertyDetailScreen() {
   const formatAddress = () => {
     if (!property) return null;
     const p = property as any;
+    const unit = p.address_unit || p.address_line2 || null;
     // Try address_formatted first (set by website via Google Places)
-    if (p.address_formatted) return p.address_formatted as string;
+    if (p.address_formatted) {
+      // Append unit/apt if stored separately and not already in the formatted string
+      if (unit && !(p.address_formatted as string).includes(unit)) {
+        return `${p.address_formatted}, ${unit}`;
+      }
+      return p.address_formatted as string;
+    }
     // Fall back to component fields — prefer website columns, then old mobile columns
     const street = p.address_street || property.address_line1;
-    const unit = p.address_unit || p.address_line2;
     const city = p.address_city || property.city;
     const state = p.address_state || property.state;
     const zip = p.address_zip || property.zip_code;

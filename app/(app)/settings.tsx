@@ -13,9 +13,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   Share,
-  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as WebBrowser from 'expo-web-browser';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
@@ -129,7 +129,7 @@ export default function SettingsScreen() {
     setSubCheckoutLoading(true);
     try {
       const url = await createFoundingLockInSession();
-      await Linking.openURL(url);
+      await WebBrowser.openBrowserAsync(url);
     } catch (error: any) {
       secureLog.error('Lock-in error:', error.message);
       showToast('error', t('plans.checkoutError'));
@@ -624,7 +624,7 @@ export default function SettingsScreen() {
           title: t('settings.helpCenter'),
           subtitle: t('settings.helpCenterSubtitle'),
           type: 'link',
-          onPress: () => Linking.openURL(`${ENV.APP_URL}/en/help-center`),
+          onPress: () => WebBrowser.openBrowserAsync(`${ENV.APP_URL}/en/help-center`),
         },
         {
           id: 'feedback',
@@ -632,7 +632,7 @@ export default function SettingsScreen() {
           title: t('settings.sendFeedback'),
           subtitle: t('settings.sendFeedbackSubtitle'),
           type: 'link',
-          onPress: () => Linking.openURL(`${ENV.APP_URL}/en/contact`),
+          onPress: () => WebBrowser.openBrowserAsync(`${ENV.APP_URL}/en/contact`),
         },
         {
           id: 'privacy',

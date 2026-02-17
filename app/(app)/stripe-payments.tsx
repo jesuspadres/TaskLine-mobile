@@ -10,6 +10,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as WebBrowser from 'expo-web-browser';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
@@ -77,7 +78,7 @@ export default function StripePaymentsScreen() {
       });
       const data = await res.json();
       if (data.url) {
-        await Linking.openURL(data.url);
+        await WebBrowser.openBrowserAsync(data.url);
         return;
       }
     } catch (error: any) {
@@ -87,7 +88,7 @@ export default function StripePaymentsScreen() {
     }
     // Fallback: open the website
     showToast('info', t('stripePayments.loginToSetup'));
-    Linking.openURL(`${ENV.APP_URL}/en/settings`);
+    WebBrowser.openBrowserAsync(`${ENV.APP_URL}/en/settings`);
   };
 
   const handleViewDashboard = async () => {
@@ -95,7 +96,7 @@ export default function StripePaymentsScreen() {
     try {
       // Try getting a dashboard login link via the website API
       const url = await createConnectDashboardSession();
-      await Linking.openURL(url);
+      await WebBrowser.openBrowserAsync(url);
       return;
     } catch (error: any) {
       secureLog.error('Dashboard link error:', error.message);
@@ -114,7 +115,7 @@ export default function StripePaymentsScreen() {
     } catch {}
 
     // Final fallback: open Stripe Express Dashboard in browser
-    Linking.openURL('https://connect.stripe.com/express_login');
+    WebBrowser.openBrowserAsync('https://connect.stripe.com/express_login');
   };
 
   const handleUpgrade = () => {

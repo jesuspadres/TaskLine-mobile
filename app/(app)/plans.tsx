@@ -6,10 +6,10 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  Linking,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as WebBrowser from 'expo-web-browser';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
@@ -101,7 +101,7 @@ export default function PlansScreen() {
     try {
       const interval = billingPeriod === 'annual' ? 'year' : 'month';
       const { url } = await createCheckoutSession(plan.slug, interval);
-      await Linking.openURL(url);
+      await WebBrowser.openBrowserAsync(url);
     } catch (error: any) {
       secureLog.error('Checkout error:', error.message);
       showToast('error', t('plans.checkoutError'));
@@ -114,7 +114,7 @@ export default function PlansScreen() {
     setCheckoutLoading(true);
     try {
       const url = await createFoundingLockInSession();
-      await Linking.openURL(url);
+      await WebBrowser.openBrowserAsync(url);
     } catch (error: any) {
       secureLog.error('Lock-in error:', error.message);
       showToast('error', t('plans.checkoutError'));
@@ -127,7 +127,7 @@ export default function PlansScreen() {
     setCheckoutLoading(true);
     try {
       const url = await createPortalSession();
-      await Linking.openURL(url);
+      await WebBrowser.openBrowserAsync(url);
     } catch (error: any) {
       secureLog.error('Portal error:', error.message);
       showToast('error', t('plans.billingError'));
