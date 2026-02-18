@@ -264,6 +264,7 @@ export default function LoginScreen() {
                 <Text style={styles.buttonText}>{t('auth.login')}</Text>
               )}
             </TouchableOpacity>
+
           </View>
 
           {/* Footer */}

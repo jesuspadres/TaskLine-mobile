@@ -156,6 +156,37 @@ export async function syncSubscription(checkoutSessionId?: string): Promise<{ ti
 }
 
 /**
+ * Send a counter offer for a booking (propose alternative date/time).
+ * Max 3 rounds per booking.
+ */
+export async function sendCounterOffer(bookingId: string, proposedDate: string, proposedTime: string, message?: string): Promise<{ success: boolean }> {
+  const res = await websiteApiFetch(`/api/booking/${bookingId}/counter`, {
+    method: 'POST',
+    body: JSON.stringify({ proposed_date: proposedDate, proposed_time: proposedTime, message }),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Counter offer failed (${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Get counter offer history for a booking.
+ */
+export async function getCounterOffers(bookingId: string): Promise<any[]> {
+  const res = await websiteApiFetch(`/api/booking/${bookingId}/counter`, {
+    method: 'GET',
+  });
+
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.counterOffers || [];
+}
+
+/**
  * Delete the current user's account and all associated data.
  * Calls the website API which uses the service role to remove the auth user.
  */
@@ -168,4 +199,123 @@ export async function deleteAccount(): Promise<void> {
     const errorData = await res.json().catch(() => ({}));
     throw new Error(errorData.error || `Account deletion failed (${res.status})`);
   }
+}
+
+// ================================================================
+// AI Assistant API
+// ================================================================
+
+export interface AiAnalysis {
+  id: string;
+  summary: string;
+  sentiment: 'positive' | 'neutral' | 'cautious' | 'urgent';
+  estimated_value: string;
+  priority_score: number;
+  recommended_actions: { action: string; reason: string }[];
+  follow_up_questions: string[];
+  status: string;
+  feedback?: string | null;
+  draft_project?: any;
+  auto_response_sent?: boolean;
+  project_created?: boolean;
+  project_id?: string | null;
+}
+
+export interface AiDraftProject {
+  name: string;
+  description: string;
+  budgetTotal: number;
+  estimatedDurationDays: number;
+  lineItems: { description: string; amount: number; type: 'labor' | 'materials' | 'other' }[];
+}
+
+export interface AiDraftTask {
+  title: string;
+  description: string;
+  priority: 'low' | 'medium' | 'high';
+  status: 'backlog';
+}
+
+/**
+ * Analyze a client request with AI.
+ * Returns the analysis (may be cached from a previous run).
+ */
+export async function analyzeRequest(requestId: string): Promise<{ analysis: AiAnalysis; cached: boolean }> {
+  const res = await websiteApiFetch('/api/ai/analyze-request', {
+    method: 'POST',
+    body: JSON.stringify({ requestId }),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Analysis failed (${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Generate an AI project draft from a client request.
+ */
+export async function draftProject(requestId: string, analysisId?: string): Promise<{ draft: AiDraftProject }> {
+  const res = await websiteApiFetch('/api/ai/draft-project', {
+    method: 'POST',
+    body: JSON.stringify({ requestId, analysisId }),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Draft project failed (${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Generate AI-drafted tasks for a project.
+ */
+export async function draftTasks(projectId: string): Promise<{ tasks: AiDraftTask[] }> {
+  const res = await websiteApiFetch('/api/ai/draft-tasks', {
+    method: 'POST',
+    body: JSON.stringify({ projectId }),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Draft tasks failed (${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Generate or send a follow-up message to a client.
+ * With send=false: returns { draft } with the AI-generated message.
+ * With send=true: sends the message and returns { success, messageId }.
+ */
+export async function respondToClient(
+  requestId: string,
+  message?: string,
+  send?: boolean,
+): Promise<{ draft?: string; success?: boolean; messageId?: string }> {
+  const res = await websiteApiFetch('/api/ai/respond-to-client', {
+    method: 'POST',
+    body: JSON.stringify({ requestId, message, send }),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Respond failed (${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Submit feedback on an AI analysis (helpful / not_helpful).
+ */
+export async function submitAiFeedback(analysisId: string, feedback: 'helpful' | 'not_helpful'): Promise<void> {
+  await (supabase.from('ai_analyses') as any)
+    .update({ feedback })
+    .eq('id', analysisId);
 }

@@ -11,6 +11,7 @@ import {
   Share,
   Linking,
   Modal as RNModal,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -19,7 +20,7 @@ import { supabase } from '@/lib/supabase';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import {
   Modal, Input, Button, Badge, Select, EmptyState, StatusBadge,
-  ListSkeleton, DatePicker, showToast,
+  ListSkeleton, DatePicker, SearchBar, showToast,
 } from '@/components';
 import type { SelectOption } from '@/components';
 import { useAuthStore } from '@/stores/authStore';
@@ -29,6 +30,9 @@ import { useOfflineData } from '@/hooks/useOfflineData';
 import { useOfflineMutation } from '@/hooks/useOfflineMutation';
 import { secureLog } from '@/lib/security';
 import { ENV } from '@/lib/env';
+import { useSubscription } from '@/hooks/useSubscription';
+import { draftTasks } from '@/lib/websiteApi';
+import type { AiDraftTask } from '@/lib/websiteApi';
 import type { Project, Task, Invoice, Client, ProjectLineItem } from '@/lib/database.types';
 
 type ProjectStage = 'planning' | 'in_progress' | 'completed';
@@ -57,6 +61,14 @@ export default function ProjectDetailScreen() {
   const { user } = useAuthStore();
   const { colors } = useTheme();
   const { t, locale } = useTranslations();
+  const { isPlus, isBusiness } = useSubscription();
+  const canUseAi = isPlus || isBusiness;
+
+  // --- AI Draft Tasks ---
+  const [aiDraftedTasks, setAiDraftedTasks] = useState<AiDraftTask[]>([]);
+  const [aiDraftingTasks, setAiDraftingTasks] = useState(false);
+  const [selectedDraftTasks, setSelectedDraftTasks] = useState<Set<number>>(new Set());
+  const [aiTasksAdded, setAiTasksAdded] = useState(false);
 
   // --- Offline Data ---
   const { data: projectData, loading, refreshing, refresh } = useOfflineData<ProjectDetailData>(
@@ -189,6 +201,7 @@ export default function ProjectDetailScreen() {
     client_id: string | null;
   }>>([]);
   const [linkingProperty, setLinkingProperty] = useState(false);
+  const [propertySearch, setPropertySearch] = useState('');
 
   // Add line item modal state
   const [showAddItemModal, setShowAddItemModal] = useState(false);
@@ -663,6 +676,75 @@ export default function ProjectDetailScreen() {
     );
   };
 
+  // --- AI Draft Tasks ---
+
+  const handleAiDraftTasks = async () => {
+    if (!project) return;
+    setAiDraftingTasks(true);
+    try {
+      const { tasks: drafted } = await draftTasks(project.id);
+      setAiDraftedTasks(drafted);
+      setSelectedDraftTasks(new Set(drafted.map((_, i) => i)));
+    } catch (error: any) {
+      secureLog.error('AI draft tasks error:', error);
+      showToast('error', error.message || t('ai.draftTasksError'));
+    } finally {
+      setAiDraftingTasks(false);
+    }
+  };
+
+  const handleAddAiDraftedTasks = async () => {
+    if (!project || selectedDraftTasks.size === 0) {
+      showToast('error', t('ai.noTasksSelected'));
+      return;
+    }
+    try {
+      const tasksToAdd = aiDraftedTasks
+        .filter((_, i) => selectedDraftTasks.has(i))
+        .map((dt) => ({
+          project_id: project.id,
+          title: dt.title,
+          description: dt.description,
+          priority: dt.priority,
+          status: 'pending',
+        }));
+
+      const { error } = await mutate({
+        table: 'tasks',
+        operation: 'insert',
+        data: tasksToAdd,
+        cacheKeys: [`project_detail:${id}`],
+      });
+      if (error) throw error;
+
+      setAiDraftedTasks([]);
+      setSelectedDraftTasks(new Set());
+      setAiTasksAdded(true);
+      refresh();
+      showToast('success', t('ai.tasksDrafted'));
+    } catch (error: any) {
+      secureLog.error('Error adding AI drafted tasks:', error);
+      showToast('error', error.message || t('projectDetail.updateError'));
+    }
+  };
+
+  const toggleDraftTask = (index: number) => {
+    setSelectedDraftTasks((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
+
+  const toggleAllDraftTasks = () => {
+    if (selectedDraftTasks.size === aiDraftedTasks.length) {
+      setSelectedDraftTasks(new Set());
+    } else {
+      setSelectedDraftTasks(new Set(aiDraftedTasks.map((_, i) => i)));
+    }
+  };
+
   // --- Line Item Actions ---
 
   const openAddItemModal = () => {
@@ -1068,7 +1150,6 @@ export default function ProjectDetailScreen() {
             </View>
           )}
         </View>
-        )}
 
         {/* Progress Bar */}
         <View style={[styles.progressCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -1098,14 +1179,86 @@ export default function ProjectDetailScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('projectDetail.tasks')}</Text>
-            <TouchableOpacity
-              style={[styles.addButton, { backgroundColor: colors.primary }]}
-              onPress={openAddTaskModal}
-            >
-              <Ionicons name="add" size={20} color="#fff" />
-              <Text style={styles.addButtonText}>{t('projectDetail.addTask')}</Text>
-            </TouchableOpacity>
+            <View style={styles.sectionHeaderActions}>
+              {canUseAi && aiDraftedTasks.length === 0 && !aiTasksAdded && (
+                <TouchableOpacity
+                  style={[styles.aiDraftBtn, { backgroundColor: colors.primary + '12', borderColor: colors.primary + '30' }]}
+                  onPress={handleAiDraftTasks}
+                  disabled={aiDraftingTasks}
+                >
+                  {aiDraftingTasks ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <Ionicons name="sparkles" size={16} color={colors.primary} />
+                  )}
+                  <Text style={[styles.aiDraftBtnText, { color: colors.primary }]}>{t('ai.draftTasks')}</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={[styles.addButton, { backgroundColor: colors.primary }]}
+                onPress={openAddTaskModal}
+              >
+                <Ionicons name="add" size={20} color="#fff" />
+                <Text style={styles.addButtonText}>{t('projectDetail.addTask')}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
+
+          {/* AI Drafted Tasks Review */}
+          {aiDraftedTasks.length > 0 && (
+            <View style={[styles.aiDraftPanel, { backgroundColor: colors.surface, borderColor: colors.primary + '30' }]}>
+              <View style={styles.aiDraftPanelHeader}>
+                <View style={styles.aiDraftPanelHeaderLeft}>
+                  <Ionicons name="sparkles" size={16} color={colors.primary} />
+                  <Text style={[styles.aiDraftPanelTitle, { color: colors.text }]}>{t('ai.draftTasks')}</Text>
+                </View>
+                <TouchableOpacity onPress={toggleAllDraftTasks}>
+                  <Text style={[styles.aiDraftSelectAll, { color: colors.primary }]}>
+                    {selectedDraftTasks.size === aiDraftedTasks.length ? t('ai.deselectAll') : t('ai.selectAll')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              {aiDraftedTasks.map((dt, idx) => {
+                const selected = selectedDraftTasks.has(idx);
+                const prioColor = dt.priority === 'high' ? colors.priorityHigh : dt.priority === 'medium' ? colors.priorityMedium : colors.priorityLow;
+                return (
+                  <TouchableOpacity
+                    key={idx}
+                    style={[styles.aiDraftItem, selected && { backgroundColor: colors.primary + '08' }]}
+                    onPress={() => toggleDraftTask(idx)}
+                  >
+                    <Ionicons
+                      name={selected ? 'checkbox' : 'square-outline'}
+                      size={22}
+                      color={selected ? colors.primary : colors.textTertiary}
+                    />
+                    <View style={styles.aiDraftItemContent}>
+                      <Text style={[styles.aiDraftItemTitle, { color: colors.text }]}>{dt.title}</Text>
+                      <Text style={[styles.aiDraftItemDesc, { color: colors.textSecondary }]} numberOfLines={2}>{dt.description}</Text>
+                    </View>
+                    <View style={[styles.aiDraftPrioBadge, { backgroundColor: prioColor + '20' }]}>
+                      <Text style={[styles.aiDraftPrioText, { color: prioColor }]}>{dt.priority}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+              <View style={styles.aiDraftActions}>
+                <TouchableOpacity
+                  style={[styles.aiDraftCancelBtn, { borderColor: colors.border }]}
+                  onPress={() => { setAiDraftedTasks([]); setSelectedDraftTasks(new Set()); }}
+                >
+                  <Text style={[styles.aiDraftCancelText, { color: colors.textSecondary }]}>{t('ai.dismiss')}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.aiDraftAddBtn, { backgroundColor: colors.primary }]}
+                  onPress={handleAddAiDraftedTasks}
+                  disabled={selectedDraftTasks.size === 0}
+                >
+                  <Text style={styles.aiDraftAddText}>{t('ai.addSelectedTasks')} ({selectedDraftTasks.size})</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
 
           {tasks.length === 0 ? (
             <View style={[styles.emptySection, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -1518,14 +1671,33 @@ export default function ProjectDetailScreen() {
       {/* Location Picker Modal */}
       <Modal
         visible={showLocationPicker}
-        onClose={() => setShowLocationPicker(false)}
+        onClose={() => { setShowLocationPicker(false); setPropertySearch(''); }}
         title={t('projectDetail.selectProperty')}
         size="full"
       >
-        <ScrollView style={styles.locationPickerList}>
-          {allProperties.filter(p => !properties.some(cp => cp.id === p.id)).length > 0 ? (
-            allProperties
-              .filter(p => !properties.some(cp => cp.id === p.id))
+        <View style={styles.propertySearchContainer}>
+          <SearchBar
+            value={propertySearch}
+            onChangeText={setPropertySearch}
+            placeholder={t('properties.searchPlaceholder')}
+          />
+        </View>
+        <ScrollView style={styles.locationPickerList} keyboardShouldPersistTaps="handled">
+          {(() => {
+            const available = allProperties.filter(p => {
+              if (properties.some(cp => cp.id === p.id)) return false;
+              if (!propertySearch.trim()) return true;
+              const q = propertySearch.toLowerCase();
+              return (
+                p.name?.toLowerCase().includes(q) ||
+                p.address_formatted?.toLowerCase().includes(q) ||
+                p.address_street?.toLowerCase().includes(q) ||
+                p.address_city?.toLowerCase().includes(q) ||
+                p.address_state?.toLowerCase().includes(q)
+              );
+            });
+            return available.length > 0 ? (
+            available
               .map((property) => {
                 const pUnit = (property as any).address_unit || null;
                 let address = property.address_formatted || [property.address_street, property.address_city, property.address_state].filter(Boolean).join(', ') || null;
@@ -1561,7 +1733,8 @@ export default function ProjectDetailScreen() {
                 {t('projectDetail.noPropertiesAvailable')}
               </Text>
             </View>
-          )}
+          );
+          })()}
         </ScrollView>
         <View style={[styles.modalActions, { borderTopColor: colors.border }]}>
           <Button
@@ -1805,6 +1978,10 @@ const styles = StyleSheet.create({
   locationEmptyText: {
     fontSize: FontSizes.sm,
     textAlign: 'center',
+  },
+  propertySearchContainer: {
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.sm,
   },
   locationPickerList: {
     maxHeight: 300,
@@ -2241,4 +2418,76 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.sm,
     fontWeight: '500',
   },
+
+  // Section header actions row
+  sectionHeaderActions: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    alignItems: 'center',
+  },
+
+  // AI Draft Tasks
+  aiDraftBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.lg,
+    gap: Spacing.xs,
+    borderWidth: 1,
+  },
+  aiDraftBtnText: { fontSize: FontSizes.sm, fontWeight: '600' },
+  aiDraftPanel: {
+    borderRadius: BorderRadius.xl,
+    borderWidth: 1,
+    padding: Spacing.lg,
+    marginBottom: Spacing.lg,
+  },
+  aiDraftPanelHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.md,
+  },
+  aiDraftPanelHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  aiDraftPanelTitle: { fontSize: FontSizes.md, fontWeight: '600' },
+  aiDraftSelectAll: { fontSize: FontSizes.xs, fontWeight: '600' },
+  aiDraftItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.xs,
+    borderRadius: BorderRadius.md,
+    marginBottom: Spacing.xs,
+  },
+  aiDraftItemContent: { flex: 1 },
+  aiDraftItemTitle: { fontSize: FontSizes.sm, fontWeight: '500' },
+  aiDraftItemDesc: { fontSize: FontSizes.xs, lineHeight: 16, marginTop: 2 },
+  aiDraftPrioBadge: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
+  },
+  aiDraftPrioText: { fontSize: 10, fontWeight: '700', textTransform: 'capitalize' },
+  aiDraftActions: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+  },
+  aiDraftCancelBtn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+  },
+  aiDraftCancelText: { fontSize: FontSizes.sm, fontWeight: '500' },
+  aiDraftAddBtn: {
+    flex: 2,
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.lg,
+  },
+  aiDraftAddText: { color: '#fff', fontSize: FontSizes.sm, fontWeight: '600' },
 });

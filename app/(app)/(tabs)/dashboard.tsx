@@ -432,7 +432,7 @@ export default function DashboardScreen() {
 
             <TouchableOpacity
               style={[styles.statsGridItem, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => router.push('/(app)/projects' as any)}
+              onPress={() => router.push({ pathname: '/(app)/projects', params: { filter: 'pending' } } as any)}
             >
               <Ionicons name="time-outline" size={16} color={colors.accent} />
               <Text style={[styles.statsStripValue, { color: colors.text }]}>{stats.pendingApprovals}</Text>

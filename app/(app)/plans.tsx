@@ -15,7 +15,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useSubscription } from '@/hooks/useSubscription';
-import { PLANS, TIER_ORDER, type TierSlug, type BillingPeriod, type PlanData } from '@/lib/plans';
+import {
+  PLANS,
+  TIER_ORDER,
+  FEATURE_CATEGORIES,
+  type TierSlug,
+  type BillingPeriod,
+  type PlanData,
+} from '@/lib/plans';
 import { Spacing, FontSizes, BorderRadius, Shadows } from '@/constants/theme';
 import { ConfirmDialog, showToast } from '@/components';
 import { supabase } from '@/lib/supabase';
@@ -24,52 +31,35 @@ import {
   createCheckoutSession,
   createPortalSession,
   createFoundingLockInSession,
+  syncSubscription,
 } from '@/lib/websiteApi';
 import { secureLog } from '@/lib/security';
 
 export default function PlansScreen() {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const { t } = useTranslations();
   const router = useRouter();
   const subscription = useSubscription();
   const { user } = useAuthStore();
   const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>('annual');
-  const [expandedPlan, setExpandedPlan] = useState<TierSlug | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [canceling, setCanceling] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
 
   const currentTierIndex = TIER_ORDER.indexOf(subscription.tier);
 
-  const featureLabels = useMemo(() => ({
-    clients: { label: t('plans.clients'), icon: 'people-outline' },
-    projects: { label: t('plans.projects'), icon: 'folder-outline' },
-    tasks: { label: t('plans.tasks'), icon: 'checkbox-outline' },
-    storage: { label: t('plans.storage'), icon: 'cloud-outline' },
-    sms: { label: t('plans.sms'), icon: 'chatbubble-outline' },
-    support: { label: t('plans.support'), icon: 'headset-outline' },
-    scheduler: { label: t('plans.scheduler'), icon: 'calendar-outline' },
-    payments: { label: t('plans.payments'), icon: 'card-outline' },
-    branding: { label: t('plans.branding'), icon: 'color-palette-outline' },
-    whiteLabel: { label: t('plans.whiteLabel'), icon: 'shield-outline' },
-    team: { label: t('plans.team'), icon: 'people-circle-outline' },
-    clientPortal: { label: t('plans.clientPortal'), icon: 'globe-outline' },
-    invoices: { label: t('plans.invoiceCreation'), icon: 'document-text-outline' },
-    projectTracking: { label: t('plans.projectTracking'), icon: 'analytics-outline' },
-    taskManagement: { label: t('plans.taskManagement'), icon: 'list-outline' },
-    fileSharing: { label: t('plans.fileSharing'), icon: 'share-outline' },
-    emailNotifications: { label: t('plans.emailNotifications'), icon: 'mail-outline' },
-    productCatalog: { label: t('plans.productCatalog'), icon: 'pricetag-outline' },
-  }), [t]) as Record<string, { label: string; icon: string }>;
-
   /** Resolve feature string values that may be i18n keys */
-  const resolveFeatureValue = useCallback((value: boolean | string) => {
-    if (typeof value !== 'string') return value;
-    if (value.includes('.')) {
-      return t(`plans.${value}`);
-    }
-    return value;
-  }, [t]);
+  const resolveFeatureValue = useCallback(
+    (value: boolean | string) => {
+      if (typeof value !== 'string') return value;
+      if (value.includes('.')) {
+        return t(`plans.${value}`);
+      }
+      return value;
+    },
+    [t],
+  );
 
   const handleSelectPlan = async (plan: PlanData) => {
     const planName = t(`plans.${plan.nameKey}`);
@@ -81,27 +71,34 @@ export default function PlansScreen() {
     if (plan.slug === subscription.tier) return;
 
     if (plan.slug === 'free') {
-      Alert.alert(
-        t('plans.downgrade'),
-        t('plans.cancelWarning'),
-        [
-          { text: t('common.cancel'), style: 'cancel' },
-          {
-            text: t('plans.confirmCancel'),
-            style: 'destructive',
-            onPress: () => setShowCancelConfirm(true),
-          },
-        ]
-      );
+      Alert.alert(t('plans.downgrade'), t('plans.cancelWarning'), [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('plans.confirmCancel'),
+          style: 'destructive',
+          onPress: () => setShowCancelConfirm(true),
+        },
+      ]);
       return;
     }
 
-    // Open Stripe Checkout via the website API
     setCheckoutLoading(true);
     try {
       const interval = billingPeriod === 'annual' ? 'year' : 'month';
-      const { url } = await createCheckoutSession(plan.slug, interval);
+      const { url, sessionId } = await createCheckoutSession(plan.slug, interval);
       await WebBrowser.openBrowserAsync(url);
+
+      if (sessionId) {
+        try {
+          const result = await syncSubscription(sessionId);
+          if (result.synced) {
+            subscription.refresh();
+            showToast('success', t('plans.subscriptionSynced'));
+          }
+        } catch (syncErr) {
+          secureLog.error('Subscription sync failed (will retry):', syncErr);
+        }
+      }
     } catch (error: any) {
       secureLog.error('Checkout error:', error.message);
       showToast('error', t('plans.checkoutError'));
@@ -173,7 +170,7 @@ export default function PlansScreen() {
     }
   };
 
-  const renderFeatureValue = (value: boolean | string | 'comingSoon') => {
+  const renderComparisonValue = (value: boolean | string | 'comingSoon') => {
     if (value === true) {
       return <Ionicons name="checkmark-circle" size={18} color={colors.success} />;
     }
@@ -190,7 +187,11 @@ export default function PlansScreen() {
       );
     }
     const resolved = resolveFeatureValue(value);
-    return <Text style={[styles.featureValueText, { color: colors.text }]}>{resolved}</Text>;
+    return (
+      <Text style={[styles.comparisonValueText, { color: colors.text }]} numberOfLines={1}>
+        {resolved}
+      </Text>
+    );
   };
 
   const annualSavings = useMemo(() => {
@@ -203,8 +204,23 @@ export default function PlansScreen() {
     }, {} as Record<string, number>);
   }, []);
 
-  // Show founding member banner if trialing + founding member + card not entered
-  const showFoundingBanner = subscription.isFoundingMember && subscription.isTrialing && !subscription.cardEntered;
+  const faqItems = useMemo(
+    () => [
+      { q: t('plans.faq.q1'), a: t('plans.faq.a1') },
+      { q: t('plans.faq.q2'), a: t('plans.faq.a2') },
+      { q: t('plans.faq.q3'), a: t('plans.faq.a3') },
+      { q: t('plans.faq.q4'), a: t('plans.faq.a4') },
+      { q: t('plans.faq.q5'), a: t('plans.faq.a5') },
+    ],
+    [t],
+  );
+
+  const showFoundingBanner =
+    subscription.isFoundingMember && subscription.isTrialing && !subscription.cardEntered;
+
+  // Column width for comparison table
+  const COL_WIDTH = 90;
+  const LABEL_WIDTH = 140;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
@@ -229,7 +245,12 @@ export default function PlansScreen() {
       >
         {/* Founding Member Welcome Banner */}
         {showFoundingBanner && (
-          <View style={[styles.foundingBanner, { backgroundColor: colors.warningLight, borderColor: colors.warning }]}>
+          <View
+            style={[
+              styles.foundingBanner,
+              { backgroundColor: colors.warningLight, borderColor: colors.warning },
+            ]}
+          >
             <View style={styles.foundingBannerHeader}>
               <Ionicons name="star" size={20} color={colors.warning} />
               <Text style={[styles.foundingBannerTitle, { color: colors.text }]}>
@@ -243,7 +264,6 @@ export default function PlansScreen() {
               {t('plans.enterCardPrompt')}
             </Text>
 
-            {/* Progress bar */}
             <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
               <View
                 style={[
@@ -268,7 +288,12 @@ export default function PlansScreen() {
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
                 <>
-                  <Ionicons name="lock-closed" size={16} color="#fff" style={{ marginRight: Spacing.xs }} />
+                  <Ionicons
+                    name="lock-closed"
+                    size={16}
+                    color="#fff"
+                    style={{ marginRight: Spacing.xs }}
+                  />
                   <Text style={styles.lockInButtonText}>{t('plans.lockInDiscount')}</Text>
                 </>
               )}
@@ -276,9 +301,14 @@ export default function PlansScreen() {
           </View>
         )}
 
-        {/* Locked-in confirmation for founding members who entered card */}
+        {/* Locked-in confirmation */}
         {subscription.isFoundingMember && subscription.cardEntered && (
-          <View style={[styles.lockedInBanner, { backgroundColor: colors.successLight, borderColor: colors.success }]}>
+          <View
+            style={[
+              styles.lockedInBanner,
+              { backgroundColor: colors.successLight, borderColor: colors.success },
+            ]}
+          >
             <Ionicons name="checkmark-circle" size={20} color={colors.success} />
             <Text style={[styles.lockedInText, { color: colors.success }]}>
               {t('plans.discountLockedIn')}
@@ -287,7 +317,12 @@ export default function PlansScreen() {
         )}
 
         {/* Billing Toggle */}
-        <View style={[styles.billingToggle, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+        <View
+          style={[
+            styles.billingToggle,
+            { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
+          ]}
+        >
           <TouchableOpacity
             style={[
               styles.billingOption,
@@ -322,7 +357,9 @@ export default function PlansScreen() {
               {t('plans.annual')}
             </Text>
             <View style={[styles.saveBadge, { backgroundColor: colors.success }]}>
-              <Text style={styles.saveBadgeText}>{t('plans.savePercent', { percent: '20' })}</Text>
+              <Text style={styles.saveBadgeText}>
+                {t('plans.savePercent', { percent: '20' })}
+              </Text>
             </View>
           </TouchableOpacity>
         </View>
@@ -331,7 +368,6 @@ export default function PlansScreen() {
         {PLANS.map((plan) => {
           const isCurrent = plan.slug === subscription.tier;
           const isPopular = plan.popular;
-          const isExpanded = expandedPlan === plan.slug;
           const tierIndex = TIER_ORDER.indexOf(plan.slug);
           const isUpgrade = tierIndex > currentTierIndex;
           const price = plan.price[billingPeriod];
@@ -344,7 +380,11 @@ export default function PlansScreen() {
                 styles.planCard,
                 {
                   backgroundColor: colors.surface,
-                  borderColor: isCurrent ? colors.primary : isPopular ? colors.accent : colors.border,
+                  borderColor: isCurrent
+                    ? colors.primary
+                    : isPopular
+                      ? colors.accent
+                      : colors.border,
                   borderWidth: isCurrent || isPopular ? 2 : 1,
                 },
               ]}
@@ -367,31 +407,20 @@ export default function PlansScreen() {
 
               {/* Plan header */}
               <View style={styles.planHeader}>
-                <View>
-                  <Text style={[styles.planName, { color: colors.text }]}>
-                    {t(`plans.${plan.nameKey}`)}
-                  </Text>
-                  <Text style={[styles.planDescription, { color: colors.textSecondary }]}>
-                    {t(`plans.${plan.descriptionKey}`)}
-                  </Text>
-                </View>
+                <Text style={[styles.planName, { color: colors.text }]}>
+                  {t(`plans.${plan.nameKey}`)}
+                </Text>
+                <Text style={[styles.planDescription, { color: colors.textSecondary }]}>
+                  {t(`plans.${plan.descriptionKey}`)}
+                </Text>
               </View>
 
               {/* Price */}
               <View style={styles.priceRow}>
-                <Text style={[styles.priceAmount, { color: colors.text }]}>
-                  ${price}
+                <Text style={[styles.priceAmount, { color: colors.text }]}>${price}</Text>
+                <Text style={[styles.pricePeriod, { color: colors.textSecondary }]}>
+                  {price > 0 ? t('plans.perMonth') : t('plans.forever')}
                 </Text>
-                {price > 0 && (
-                  <Text style={[styles.pricePeriod, { color: colors.textSecondary }]}>
-                    {t('plans.perMonth')}
-                  </Text>
-                )}
-                {price === 0 && (
-                  <Text style={[styles.pricePeriod, { color: colors.textSecondary }]}>
-                    {t('plans.forever')}
-                  </Text>
-                )}
               </View>
 
               {billingPeriod === 'annual' && savings > 0 && (
@@ -405,13 +434,15 @@ export default function PlansScreen() {
                 <View style={styles.summaryRow}>
                   <Ionicons name="people-outline" size={16} color={colors.textSecondary} />
                   <Text style={[styles.summaryText, { color: colors.textSecondary }]}>
-                    {resolveFeatureValue(plan.features.clients)} {t('plans.clients').toLowerCase()}
+                    {resolveFeatureValue(plan.features.clients)}{' '}
+                    {t('plans.clients').toLowerCase()}
                   </Text>
                 </View>
                 <View style={styles.summaryRow}>
                   <Ionicons name="folder-outline" size={16} color={colors.textSecondary} />
                   <Text style={[styles.summaryText, { color: colors.textSecondary }]}>
-                    {resolveFeatureValue(plan.features.projects)} {t('plans.projects').toLowerCase()}
+                    {resolveFeatureValue(plan.features.projects)}{' '}
+                    {t('plans.projects').toLowerCase()}
                   </Text>
                 </View>
                 <View style={styles.summaryRow}>
@@ -420,43 +451,15 @@ export default function PlansScreen() {
                     {plan.features.storage} {t('plans.storage').toLowerCase()}
                   </Text>
                 </View>
+                {plan.features.aiAssistant && (
+                  <View style={styles.summaryRow}>
+                    <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
+                    <Text style={[styles.summaryText, { color: colors.primary, fontWeight: '600' }]}>
+                      {t('plans.aiAssistant')}
+                    </Text>
+                  </View>
+                )}
               </View>
-
-              {/* Expand/collapse features */}
-              <TouchableOpacity
-                style={[styles.expandButton, { borderTopColor: colors.borderLight }]}
-                onPress={() => setExpandedPlan(isExpanded ? null : plan.slug)}
-              >
-                <Text style={[styles.expandButtonText, { color: colors.primary }]}>
-                  {isExpanded ? t('plans.hideFeatures') : t('plans.allFeatures')}
-                </Text>
-                <Ionicons
-                  name={isExpanded ? 'chevron-up' : 'chevron-down'}
-                  size={16}
-                  color={colors.primary}
-                />
-              </TouchableOpacity>
-
-              {/* Expanded features list */}
-              {isExpanded && (
-                <View style={[styles.featuresList, { borderTopColor: colors.borderLight }]}>
-                  {Object.entries(plan.features).map(([key, value]) => {
-                    const meta = featureLabels[key];
-                    if (!meta) return null;
-                    return (
-                      <View key={key} style={styles.featureRow}>
-                        <View style={styles.featureLabelRow}>
-                          <Ionicons name={meta.icon as any} size={16} color={colors.textSecondary} />
-                          <Text style={[styles.featureLabel, { color: colors.textSecondary }]}>
-                            {meta.label}
-                          </Text>
-                        </View>
-                        {renderFeatureValue(value)}
-                      </View>
-                    );
-                  })}
-                </View>
-              )}
 
               {/* Action button */}
               {plan.comingSoon ? (
@@ -467,7 +470,9 @@ export default function PlansScreen() {
                 </View>
               ) : isCurrent ? (
                 subscription.tier === 'free' ? (
-                  <View style={[styles.actionButton, { backgroundColor: colors.surfaceSecondary }]}>
+                  <View
+                    style={[styles.actionButton, { backgroundColor: colors.surfaceSecondary }]}
+                  >
                     <Text style={[styles.actionButtonText, { color: colors.textTertiary }]}>
                       {t('plans.currentPlan')}
                     </Text>
@@ -505,7 +510,10 @@ export default function PlansScreen() {
                   disabled={checkoutLoading}
                 >
                   {checkoutLoading ? (
-                    <ActivityIndicator size="small" color={isUpgrade ? '#fff' : colors.text} />
+                    <ActivityIndicator
+                      size="small"
+                      color={isUpgrade ? '#fff' : colors.text}
+                    />
                   ) : (
                     <Text
                       style={[
@@ -522,9 +530,144 @@ export default function PlansScreen() {
           );
         })}
 
-        {/* Subscription Info + Manage Billing */}
+        {/* ============================================================ */}
+        {/* Detailed Comparison Table                                     */}
+        {/* ============================================================ */}
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          {t('plans.detailedComparison')}
+        </Text>
+
+        <View
+          style={[
+            styles.comparisonCard,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+            <View>
+              {/* Table header row */}
+              <View
+                style={[styles.comparisonHeaderRow, { backgroundColor: colors.surfaceSecondary }]}
+              >
+                <View style={[styles.comparisonLabelCell, { width: LABEL_WIDTH }]}>
+                  <Text style={[styles.comparisonHeaderLabel, { color: colors.textSecondary }]}>
+                    {t('plans.features')}
+                  </Text>
+                </View>
+                {PLANS.map((plan) => (
+                  <View
+                    key={plan.slug}
+                    style={[
+                      styles.comparisonValueCell,
+                      { width: COL_WIDTH },
+                      plan.popular && { backgroundColor: colors.primaryLight },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.comparisonHeaderPlan, { color: colors.text }]}
+                      numberOfLines={1}
+                    >
+                      {t(`plans.${plan.nameKey}`)}
+                    </Text>
+                    <Text style={[styles.comparisonHeaderPrice, { color: colors.textSecondary }]}>
+                      ${plan.price[billingPeriod]}
+                      {plan.price.monthly > 0 ? t('plans.perMonth') : ''}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+
+              {/* Category sections */}
+              {FEATURE_CATEGORIES.map((category) => (
+                <View key={category.categoryKey}>
+                  {/* Category header */}
+                  <View
+                    style={[
+                      styles.categoryRow,
+                      { backgroundColor: colors.surfaceSecondary },
+                    ]}
+                  >
+                    <Text style={[styles.categoryText, { color: colors.textSecondary }]}>
+                      {t(`plans.${category.categoryKey}`)}
+                    </Text>
+                  </View>
+
+                  {/* Feature rows */}
+                  {category.features.map((featureKey) => (
+                    <View
+                      key={featureKey}
+                      style={[styles.comparisonRow, { borderBottomColor: colors.borderLight }]}
+                    >
+                      <View style={[styles.comparisonLabelCell, { width: LABEL_WIDTH }]}>
+                        <Text style={[styles.comparisonLabel, { color: colors.text }]}>
+                          {t(`plans.featureLabels.${featureKey}`)}
+                        </Text>
+                      </View>
+                      {PLANS.map((plan) => {
+                        const value =
+                          plan.features[featureKey as keyof typeof plan.features];
+                        return (
+                          <View
+                            key={plan.slug}
+                            style={[
+                              styles.comparisonValueCell,
+                              { width: COL_WIDTH },
+                              plan.popular && { backgroundColor: colors.primaryLight },
+                            ]}
+                          >
+                            {renderComparisonValue(value)}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ))}
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+
+        {/* ============================================================ */}
+        {/* FAQ Section                                                   */}
+        {/* ============================================================ */}
+        <Text style={[styles.sectionTitle, { color: colors.text, marginTop: Spacing.xl }]}>
+          {t('plans.faq.title')}
+        </Text>
+
+        {faqItems.map((item, index) => (
+          <TouchableOpacity
+            key={index}
+            style={[
+              styles.faqItem,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+            onPress={() => setExpandedFaq(expandedFaq === index ? null : index)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.faqHeader}>
+              <Text style={[styles.faqQuestion, { color: colors.text }]}>{item.q}</Text>
+              <Ionicons
+                name={expandedFaq === index ? 'chevron-up' : 'chevron-down'}
+                size={18}
+                color={colors.textTertiary}
+              />
+            </View>
+            {expandedFaq === index && (
+              <Text style={[styles.faqAnswer, { color: colors.textSecondary }]}>{item.a}</Text>
+            )}
+          </TouchableOpacity>
+        ))}
+
+        {/* ============================================================ */}
+        {/* Subscription Info + Manage Billing                           */}
+        {/* ============================================================ */}
         {subscription.tier !== 'free' && (
-          <View style={[styles.manageLink, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View
+            style={[
+              styles.manageLink,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+          >
             <View style={styles.manageLinkRow}>
               <Ionicons name="card-outline" size={20} color={colors.primary} />
               <View style={styles.manageLinkContent}>
@@ -533,12 +676,16 @@ export default function PlansScreen() {
                 </Text>
                 {subscription.isTrialing && subscription.trialEnd && (
                   <Text style={[styles.manageLinkSubtitle, { color: colors.textSecondary }]}>
-                    {t('plans.trialEnds')} {new Date(subscription.trialEnd).toLocaleDateString()}
+                    {t('plans.trialEnds')}{' '}
+                    {new Date(subscription.trialEnd).toLocaleDateString()}
                   </Text>
                 )}
                 {subscription.billingPeriod && (
                   <Text style={[styles.manageLinkSubtitle, { color: colors.textSecondary }]}>
-                    {subscription.billingPeriod === 'annual' ? t('plans.annual') : t('plans.monthly')} {t('plans.billing').toLowerCase()}
+                    {subscription.billingPeriod === 'annual'
+                      ? t('plans.annual')
+                      : t('plans.monthly')}{' '}
+                    {t('plans.billing').toLowerCase()}
                   </Text>
                 )}
                 {subscription.currentPeriodEnd && (
@@ -794,52 +941,6 @@ const styles = StyleSheet.create({
   summaryText: {
     fontSize: FontSizes.sm,
   },
-  // Expand
-  expandButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Spacing.sm,
-    borderTopWidth: 1,
-    gap: 4,
-  },
-  expandButtonText: {
-    fontSize: FontSizes.sm,
-    fontWeight: '600',
-  },
-  // Features list
-  featuresList: {
-    borderTopWidth: 1,
-    paddingTop: Spacing.md,
-    marginBottom: Spacing.md,
-  },
-  featureRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: Spacing.sm,
-  },
-  featureLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-  },
-  featureLabel: {
-    fontSize: FontSizes.sm,
-  },
-  featureValueText: {
-    fontSize: FontSizes.sm,
-    fontWeight: '600',
-  },
-  comingSoonBadge: {
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-    borderRadius: BorderRadius.full,
-  },
-  comingSoonText: {
-    fontSize: FontSizes.xs,
-    fontWeight: '600',
-  },
   // Action button
   actionButton: {
     paddingVertical: Spacing.md,
@@ -853,12 +954,108 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.md,
     fontWeight: '600',
   },
+  // Coming soon badge (shared)
+  comingSoonBadge: {
+    paddingHorizontal: Spacing.xs,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
+  },
+  comingSoonText: {
+    fontSize: 9,
+    fontWeight: '600',
+  },
+  // Section title
+  sectionTitle: {
+    fontSize: FontSizes.xl,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: Spacing.lg,
+    marginTop: Spacing.md,
+  },
+  // Comparison table
+  comparisonCard: {
+    borderRadius: BorderRadius.xl,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  comparisonHeaderRow: {
+    flexDirection: 'row',
+    paddingVertical: Spacing.md,
+  },
+  comparisonLabelCell: {
+    paddingHorizontal: Spacing.md,
+    justifyContent: 'center',
+  },
+  comparisonHeaderLabel: {
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
+  },
+  comparisonValueCell: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.xs,
+    paddingVertical: Spacing.sm,
+  },
+  comparisonHeaderPlan: {
+    fontSize: FontSizes.sm,
+    fontWeight: '700',
+  },
+  comparisonHeaderPrice: {
+    fontSize: FontSizes.xs,
+    marginTop: 2,
+  },
+  categoryRow: {
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+  },
+  categoryText: {
+    fontSize: FontSizes.xs,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  comparisonRow: {
+    flexDirection: 'row',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: Spacing.sm,
+  },
+  comparisonLabel: {
+    fontSize: FontSizes.sm,
+  },
+  comparisonValueText: {
+    fontSize: FontSizes.xs,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  // FAQ
+  faqItem: {
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    padding: Spacing.md,
+    marginBottom: Spacing.sm,
+  },
+  faqHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  faqQuestion: {
+    fontSize: FontSizes.md,
+    fontWeight: '600',
+    flex: 1,
+    marginRight: Spacing.sm,
+  },
+  faqAnswer: {
+    fontSize: FontSizes.sm,
+    lineHeight: 20,
+    marginTop: Spacing.sm,
+  },
   // Manage link
   manageLink: {
     padding: Spacing.lg,
     borderRadius: BorderRadius.xl,
     borderWidth: 1,
-    marginTop: Spacing.sm,
+    marginTop: Spacing.xl,
   },
   manageLinkRow: {
     flexDirection: 'row',

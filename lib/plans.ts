@@ -25,6 +25,7 @@ export interface PlanFeatures {
   taskManagement: boolean;
   fileSharing: boolean;
   emailNotifications: boolean;
+  aiAssistant: boolean;
 }
 
 export interface PlanData {
@@ -66,6 +67,7 @@ export const PLANS: PlanData[] = [
       taskManagement: true,
       fileSharing: true,
       emailNotifications: true,
+      aiAssistant: false,
     },
   },
   {
@@ -92,6 +94,7 @@ export const PLANS: PlanData[] = [
       taskManagement: true,
       fileSharing: true,
       emailNotifications: true,
+      aiAssistant: false,
     },
   },
   {
@@ -119,6 +122,7 @@ export const PLANS: PlanData[] = [
       taskManagement: true,
       fileSharing: true,
       emailNotifications: true,
+      aiAssistant: true,
     },
   },
   {
@@ -146,6 +150,7 @@ export const PLANS: PlanData[] = [
       taskManagement: true,
       fileSharing: true,
       emailNotifications: true,
+      aiAssistant: true,
     },
   },
 ];
@@ -175,6 +180,7 @@ export const PLAN_FEATURE_KEYS = [
   'storage',
   'sms',
   'support',
+  'aiAssistant',
   'scheduler',
   'whiteLabel',
   'team',
@@ -198,6 +204,6 @@ export const FEATURE_CATEGORIES = [
   },
   {
     categoryKey: 'featureCategories.advanced',
-    features: ['scheduler', 'productCatalog', 'payments', 'branding', 'whiteLabel'],
+    features: ['aiAssistant', 'scheduler', 'productCatalog', 'payments', 'branding', 'whiteLabel'],
   },
 ] as const;

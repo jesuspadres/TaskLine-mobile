@@ -30,7 +30,7 @@ import { secureLog } from '@/lib/security';
 
 export default function ProjectsScreen() {
   const router = useRouter();
-  const { create } = useLocalSearchParams<{ create?: string }>();
+  const { create, filter } = useLocalSearchParams<{ create?: string; filter?: string }>();
   const { user } = useAuthStore();
   const { colors } = useTheme();
   const { t, locale } = useTranslations();
@@ -39,7 +39,7 @@ export default function ProjectsScreen() {
   const [clients, setClients] = useState<Client[]>([]);
   const { mutate } = useOfflineMutation();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<string>(filter || 'all');
 
   const { data: projects, loading, refreshing, refresh } = useOfflineData<ProjectWithRelations[]>(
     'projects',
@@ -247,13 +247,17 @@ export default function ProjectsScreen() {
     setShowAddModal(true);
   };
 
-  // Auto-open create modal when navigated with create param
+  // Auto-open create modal or set filter when navigated with params
   useEffect(() => {
     if (create === 'true') {
       openAddModal();
       router.setParams({ create: '' });
     }
-  }, [create]);
+    if (filter) {
+      setFilterStatus(filter);
+      router.setParams({ filter: '' });
+    }
+  }, [create, filter]);
 
   // Filter and sort projects
   const filteredProjects = useMemo(() => {

@@ -97,6 +97,9 @@ export default function JobsScreen() {
   // --- Segment ---
   const [segment, setSegment] = useState<Segment>('requests');
 
+  // --- Linked project counts (request_id → count) ---
+  const [projectCountMap, setProjectCountMap] = useState<Record<string, number>>({});
+
   // --- Requests state ---
   const { data: requests, loading: requestsLoading, refreshing: requestsRefreshing, refresh: refreshRequests } = useOfflineData<RequestWithClient[]>(
     'requests',
@@ -106,6 +109,22 @@ export default function JobsScreen() {
         .select('*, client:clients(id, name, email)')
         .order('created_at', { ascending: false });
       if (error) throw error;
+
+      // Fetch linked project counts for all requests
+      const requestIds = (data || []).map((r: any) => r.id);
+      if (requestIds.length > 0) {
+        const { data: projects } = await (supabase.from('projects') as any)
+          .select('request_id')
+          .in('request_id', requestIds);
+        const counts: Record<string, number> = {};
+        (projects || []).forEach((p: any) => {
+          if (p.request_id) {
+            counts[p.request_id] = (counts[p.request_id] || 0) + 1;
+          }
+        });
+        setProjectCountMap(counts);
+      }
+
       return (data || []) as any;
     },
   );
@@ -144,6 +163,7 @@ export default function JobsScreen() {
     { key: 'reviewing', label: t('requests.reviewing') },
     { key: 'accepted', label: t('requests.accepted') },
     { key: 'declined', label: t('requests.declined') },
+    { key: 'archived', label: t('requests.archived') },
     { key: 'all', label: t('requests.all') },
   ], [t]);
 
@@ -175,6 +195,9 @@ export default function JobsScreen() {
   const requestStatusColors = useMemo<Record<string, { bg: string; text: string }>>(() => ({
     new: { bg: colors.statusNew + '20', text: colors.statusNew },
     reviewing: { bg: colors.warningLight, text: colors.warning },
+    contacted: { bg: colors.warningLight, text: colors.warning },
+    quoted: { bg: colors.warningLight, text: colors.warning },
+    needs_info: { bg: colors.warningLight, text: colors.warning },
     accepted: { bg: colors.successLight, text: colors.success },
     converted: { bg: colors.successLight, text: colors.success },
     declined: { bg: colors.surfaceSecondary, text: colors.textTertiary },
@@ -189,12 +212,26 @@ export default function JobsScreen() {
   }), [colors]);
 
   // ================================================================
+  // Status grouping (matches website logic)
+  // ================================================================
+  const REVIEWING_STATUSES = ['reviewing', 'contacted', 'quoted', 'needs_info'];
+  const ACCEPTED_STATUSES = ['accepted', 'converted'];
+
+  const matchesFilterGroup = useCallback((status: string, filter: string): boolean => {
+    switch (filter) {
+      case 'reviewing': return REVIEWING_STATUSES.includes(status);
+      case 'accepted': return ACCEPTED_STATUSES.includes(status);
+      default: return status === filter;
+    }
+  }, []);
+
+  // ================================================================
   // Computed: filtered/sorted/searched data
   // ================================================================
   const filteredRequests = useMemo(() => {
     let result = (requests ?? []);
     if (requestFilterStatus !== 'all') {
-      result = result.filter(r => r.status === requestFilterStatus);
+      result = result.filter(r => matchesFilterGroup(r.status, requestFilterStatus));
     }
     if (requestSearch.trim()) {
       const q = requestSearch.toLowerCase();
@@ -250,9 +287,10 @@ export default function JobsScreen() {
   // Request stats
   const requestStats = useMemo(() => ({
     new: (requests ?? []).filter(r => r.status === 'new').length,
-    reviewing: (requests ?? []).filter(r => r.status === 'reviewing').length,
-    accepted: (requests ?? []).filter(r => r.status === 'accepted' || r.status === 'converted').length,
+    reviewing: (requests ?? []).filter(r => REVIEWING_STATUSES.includes(r.status)).length,
+    accepted: (requests ?? []).filter(r => ACCEPTED_STATUSES.includes(r.status)).length,
     declined: (requests ?? []).filter(r => r.status === 'declined').length,
+    archived: (requests ?? []).filter(r => r.status === 'archived').length,
   }), [requests]);
 
   // Booking stats
@@ -336,13 +374,14 @@ export default function JobsScreen() {
     if (!convertTarget || !user) return;
     setConvertConfirmVisible(false);
     try {
-      const { error: projectError } = await supabase.from('projects').insert({
+      const { data: newProject, error: projectError } = await (supabase.from('projects') as any).insert({
         name: convertTarget.title,
         description: convertTarget.description || convertTarget.project_description || null,
         client_id: convertTarget.client_id,
         status: 'active',
         user_id: user.id,
-      });
+        request_id: convertTarget.id,
+      }).select('id').single();
       if (projectError) throw projectError;
 
       const { error: updateError } = await supabase
@@ -354,11 +393,29 @@ export default function JobsScreen() {
       haptics.notification(Haptics.NotificationFeedbackType.Success);
       refreshRequests();
       showToast('success', t('requests.convertSuccess'));
+
+      // Navigate to the new project
+      if (newProject?.id) {
+        router.push(`/(app)/project-detail?id=${newProject.id}` as any);
+      }
     } catch (error) {
       secureLog.error('Error converting request:', error);
       showToast('error', t('requests.convertError'));
     }
     setConvertTarget(null);
+  };
+
+  const handleMarkComplete = async (requestId: string) => {
+    try {
+      const { error } = await mutate({ table: 'requests', operation: 'update', data: { status: 'archived' }, matchValue: requestId, cacheKeys: ['requests'] });
+      if (error) throw error;
+      haptics.notification(Haptics.NotificationFeedbackType.Success);
+      refreshRequests();
+      showToast('success', t('requests.markedComplete'));
+    } catch (error) {
+      secureLog.error('Error marking request complete:', error);
+      showToast('error', t('requests.updateError'));
+    }
   };
 
   const handleShareLink = async () => {
@@ -441,6 +498,7 @@ export default function JobsScreen() {
     const clientName = item.client?.name || item.name || t('requests.unknown');
     const desc = item.project_description || item.description;
     const budget = item.budget_range || item.budget;
+    const hasLinkedProject = (projectCountMap[item.id] || 0) > 0;
 
     return (
       <TouchableOpacity
@@ -518,7 +576,7 @@ export default function JobsScreen() {
         </View>
 
         {/* Quick Actions - based on status, matching website */}
-        {(status === 'new' || status === 'reviewing') && (
+        {(status === 'new' || REVIEWING_STATUSES.includes(status)) && (
           <View style={[styles.quickActions, { borderTopColor: colors.borderLight }]}>
             {status === 'new' && (
               <TouchableOpacity
@@ -531,15 +589,17 @@ export default function JobsScreen() {
                 </Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity
-              style={styles.quickActionButton}
-              onPress={() => handleConvertToProject(item)}
-            >
-              <Ionicons name="folder-outline" size={16} color={colors.primary} />
-              <Text style={[styles.quickActionText, { color: colors.primary }]}>
-                {t('requests.createProposal')}
-              </Text>
-            </TouchableOpacity>
+            {!hasLinkedProject && (
+              <TouchableOpacity
+                style={styles.quickActionButton}
+                onPress={() => handleConvertToProject(item)}
+              >
+                <Ionicons name="folder-outline" size={16} color={colors.primary} />
+                <Text style={[styles.quickActionText, { color: colors.primary }]}>
+                  {t('requests.createProposal')}
+                </Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.quickActionButton}
               onPress={() => handleQuickStatusUpdate(item.id, 'accepted')}
@@ -561,32 +621,35 @@ export default function JobsScreen() {
           </View>
         )}
 
-        {/* Accepted requests - archive + create project */}
-        {status === 'accepted' && (
+        {/* Accepted requests - convert to project OR mark complete */}
+        {ACCEPTED_STATUSES.includes(status) && (
           <View style={[styles.quickActions, { borderTopColor: colors.borderLight }]}>
-            <TouchableOpacity
-              style={styles.quickActionButton}
-              onPress={() => handleConvertToProject(item)}
-            >
-              <Ionicons name="folder-outline" size={16} color={colors.primary} />
-              <Text style={[styles.quickActionText, { color: colors.primary }]}>
-                {t('requests.convertToProject')}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.quickActionButton}
-              onPress={() => handleQuickStatusUpdate(item.id, 'archived')}
-            >
-              <Ionicons name="archive-outline" size={16} color={colors.textTertiary} />
-              <Text style={[styles.quickActionText, { color: colors.textTertiary }]}>
-                {t('requests.archived')}
-              </Text>
-            </TouchableOpacity>
+            {hasLinkedProject ? (
+              <TouchableOpacity
+                style={styles.quickActionButton}
+                onPress={() => handleMarkComplete(item.id)}
+              >
+                <Ionicons name="checkmark-done-outline" size={16} color={colors.success} />
+                <Text style={[styles.quickActionText, { color: colors.success }]}>
+                  {t('requestDetail.markComplete')}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.quickActionButton}
+                onPress={() => handleConvertToProject(item)}
+              >
+                <Ionicons name="folder-outline" size={16} color={colors.primary} />
+                <Text style={[styles.quickActionText, { color: colors.primary }]}>
+                  {t('requests.convertToProject')}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
       </TouchableOpacity>
     );
-  }, [colors, t, requestStatusColors, navigateToRequestDetail, formatRequestDate, getStatusLabel, handleQuickStatusUpdate, handleConvertToProject, openInMaps, dateLocale]);
+  }, [colors, t, requestStatusColors, navigateToRequestDetail, formatRequestDate, getStatusLabel, handleQuickStatusUpdate, handleConvertToProject, handleMarkComplete, projectCountMap, openInMaps, dateLocale]);
 
   // ================================================================
   // RENDER: Booking card
@@ -869,6 +932,7 @@ export default function JobsScreen() {
               data={filteredRequests}
               renderItem={renderRequest}
               keyExtractor={(item) => item.id}
+              extraData={projectCountMap}
               keyboardDismissMode="on-drag"
               contentContainerStyle={[styles.listContent, { paddingTop: filterHeight }]}
               onScroll={onScroll}

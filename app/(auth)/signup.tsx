@@ -938,4 +938,5 @@ const styles = StyleSheet.create({
   showMoreText: { fontSize: FontSizes.xs, fontWeight: '600' },
   planActionBtn: { paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, alignItems: 'center', justifyContent: 'center', minHeight: 44 },
   planActionText: { fontSize: FontSizes.sm, fontWeight: '600' },
+
 });

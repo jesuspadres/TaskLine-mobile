@@ -7,6 +7,9 @@ import {
   TouchableOpacity,
   RefreshControl,
   Linking,
+  TextInput,
+  ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -15,11 +18,12 @@ import * as Haptics from 'expo-haptics';
 import { supabase } from '@/lib/supabase';
 import { secureLog } from '@/lib/security';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
-import { Button, EmptyState, ListSkeleton, ConfirmDialog, showToast } from '@/components';
+import { Button, EmptyState, ListSkeleton, ConfirmDialog, showToast, DatePicker } from '@/components';
 import { useAuthStore } from '@/stores/authStore';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
+import { sendCounterOffer } from '@/lib/websiteApi';
 
 interface BookingData {
   id: string;
@@ -81,6 +85,13 @@ export default function BookingDetailScreen() {
 
   // Complete modal state
   const [completeModalVisible, setCompleteModalVisible] = useState(false);
+
+  // Counter offer state
+  const [counterModalVisible, setCounterModalVisible] = useState(false);
+  const [counterDate, setCounterDate] = useState<Date | null>(new Date());
+  const [counterTime, setCounterTime] = useState('09:00');
+  const [counterMessage, setCounterMessage] = useState('');
+  const [counterSending, setCounterSending] = useState(false);
 
   // ================================================================
   // FETCH
@@ -205,6 +216,24 @@ export default function BookingDetailScreen() {
     setCompleteModalVisible(false);
     setConfirmAction('completed');
     setConfirmVisible(true);
+  };
+
+  const handleCounterOffer = async () => {
+    if (!booking || !counterDate) return;
+    setCounterSending(true);
+    try {
+      const proposedDate = counterDate.toISOString().split('T')[0];
+      await sendCounterOffer(booking.id, proposedDate, counterTime, counterMessage.trim() || undefined);
+      haptics.notification(Haptics.NotificationFeedbackType.Success);
+      showToast('success', t('bookingDetail.counterSent'));
+      setCounterModalVisible(false);
+      setCounterMessage('');
+    } catch (error: any) {
+      secureLog.error('Counter offer error:', error);
+      showToast('error', error.message || t('bookingDetail.counterError'));
+    } finally {
+      setCounterSending(false);
+    }
   };
 
   const handleSaveProperty = async () => {
@@ -532,6 +561,13 @@ export default function BookingDetailScreen() {
                 style={styles.actionButton}
               />
             </View>
+            <TouchableOpacity
+              style={[styles.counterOfferBtn, { borderColor: colors.primary }]}
+              onPress={() => setCounterModalVisible(true)}
+            >
+              <Ionicons name="swap-horizontal-outline" size={18} color={colors.primary} />
+              <Text style={[styles.counterOfferBtnText, { color: colors.primary }]}>{t('bookingDetail.proposeNewTime')}</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -597,6 +633,72 @@ export default function BookingDetailScreen() {
         onConfirm={handleCompleteAndInvoice}
         onCancel={handleJustComplete}
       />
+
+      {/* Counter Offer Modal */}
+      <Modal
+        visible={counterModalVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setCounterModalVisible(false)}
+      >
+        <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+          <View style={styles.header}>
+            <TouchableOpacity style={[styles.backButton, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => setCounterModalVisible(false)}>
+              <Ionicons name="close" size={24} color={colors.text} />
+            </TouchableOpacity>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>{t('bookingDetail.proposeNewTime')}</Text>
+            <View style={styles.headerSpacer} />
+          </View>
+          <ScrollView style={styles.scrollView} contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 }]}>
+            <Text style={[styles.counterHint, { color: colors.textSecondary }]}>{t('bookingDetail.counterHint')}</Text>
+
+            <DatePicker
+              label={t('bookingDetail.proposedDate')}
+              value={counterDate}
+              onChange={setCounterDate}
+              placeholder={t('bookingDetail.selectDate')}
+            />
+
+            <View style={styles.counterTimeSection}>
+              <Text style={[styles.counterLabel, { color: colors.text }]}>{t('bookingDetail.proposedTime')}</Text>
+              <TextInput
+                style={[styles.counterTimeInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+                value={counterTime}
+                onChangeText={setCounterTime}
+                placeholder="09:00"
+                placeholderTextColor={colors.textTertiary}
+                keyboardType="numbers-and-punctuation"
+              />
+            </View>
+
+            <View style={styles.counterTimeSection}>
+              <Text style={[styles.counterLabel, { color: colors.text }]}>{t('bookingDetail.counterMessage')}</Text>
+              <TextInput
+                style={[styles.counterMsgInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+                value={counterMessage}
+                onChangeText={setCounterMessage}
+                placeholder={t('bookingDetail.counterMessagePlaceholder')}
+                placeholderTextColor={colors.textTertiary}
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.counterSendBtn, { backgroundColor: colors.primary }, counterSending && { opacity: 0.7 }]}
+              onPress={handleCounterOffer}
+              disabled={counterSending || !counterDate}
+            >
+              {counterSending ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.counterSendBtnText}>{t('bookingDetail.sendCounter')}</Text>
+              )}
+            </TouchableOpacity>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -732,6 +834,32 @@ const styles = StyleSheet.create({
   // Action buttons
   actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   actionButton: { minWidth: '45%', flex: 1 },
+
+  // Counter offer
+  counterOfferBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.md, marginTop: Spacing.sm, gap: Spacing.sm,
+  },
+  counterOfferBtnText: { fontSize: FontSizes.sm, fontWeight: '600' },
+  counterHint: { fontSize: FontSizes.sm, lineHeight: 20, marginBottom: Spacing.lg },
+  counterTimeSection: { marginBottom: Spacing.lg },
+  counterLabel: { fontSize: FontSizes.sm, fontWeight: '500', marginBottom: Spacing.sm },
+  counterTimeInput: {
+    borderWidth: 1, borderRadius: BorderRadius.lg,
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.md,
+    fontSize: FontSizes.md, minHeight: 48,
+  },
+  counterMsgInput: {
+    borderWidth: 1, borderRadius: BorderRadius.lg,
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.md,
+    fontSize: FontSizes.sm, minHeight: 100,
+  },
+  counterSendBtn: {
+    paddingVertical: Spacing.lg, borderRadius: BorderRadius.lg,
+    alignItems: 'center', justifyContent: 'center', minHeight: 52,
+  },
+  counterSendBtnText: { color: '#fff', fontSize: FontSizes.md, fontWeight: '600' },
 
   // Metadata
   metadataFooter: { paddingVertical: Spacing.md, alignItems: 'center' },

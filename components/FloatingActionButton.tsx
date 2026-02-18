@@ -141,6 +141,16 @@ export function FloatingActionButton({ tabBarHeight = 92 }: FloatingActionButton
           router.push({ pathname: '/(app)/invoices', params: { create: 'true' } } as any);
         },
       },
+      {
+        id: 'property',
+        icon: 'home-outline',
+        label: t('fab.newProperty'),
+        color: colors.primary,
+        onPress: () => {
+          close();
+          router.push({ pathname: '/(app)/properties', params: { create: 'true' } } as any);
+        },
+      },
     ],
     [colors, t, close, router]
   );

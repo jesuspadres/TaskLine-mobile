@@ -613,6 +613,14 @@ export default function SettingsScreen() {
           type: 'link',
           onPress: () => router.push('/(app)/booking-settings' as any),
         },
+        {
+          id: 'ai_settings',
+          icon: 'sparkles-outline',
+          title: t('settings.aiSettings'),
+          subtitle: t('settings.aiSettingsSubtitle'),
+          type: 'link',
+          onPress: () => router.push('/(app)/ai-settings' as any),
+        },
       ],
     },
     {

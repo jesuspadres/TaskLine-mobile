@@ -38,7 +38,10 @@
       "WebFetch(domain:docs.stripe.com)",
       "Bash(python:*)",
       "Bash(magick identify:*)",
-      "WebFetch(domain:taskline.solvrlabs.com)"
+      "WebFetch(domain:taskline.solvrlabs.com)",
+      "Bash(git show:*)",
+      "Bash(cat:*)",
+      "Bash(curl:*)"
     ]
   }
 }

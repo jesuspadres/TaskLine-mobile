@@ -21,8 +21,6 @@ export default function AppLayout() {
       <Stack.Screen name="notifications" />
       <Stack.Screen name="properties" />
       <Stack.Screen name="plans" />
-      <Stack.Screen name="bookings" />
-      <Stack.Screen name="requests" />
       <Stack.Screen name="client-detail" />
       <Stack.Screen name="project-detail" />
       <Stack.Screen name="request-detail" />
@@ -37,6 +35,7 @@ export default function AppLayout() {
       <Stack.Screen name="privacy-policy" />
       <Stack.Screen name="terms-of-service" />
       <Stack.Screen name="stripe-payments" />
+      <Stack.Screen name="ai-settings" />
     </Stack>
   );
 }

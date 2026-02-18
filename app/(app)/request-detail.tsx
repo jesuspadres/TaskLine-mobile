@@ -7,6 +7,11 @@ import {
   TouchableOpacity,
   RefreshControl,
   Linking,
+  ActivityIndicator,
+  TextInput,
+  Modal as RNModal,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -22,6 +27,9 @@ import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useOfflineData } from '@/hooks/useOfflineData';
 import { useOfflineMutation } from '@/hooks/useOfflineMutation';
+import { useSubscription } from '@/hooks/useSubscription';
+import { analyzeRequest, draftProject, respondToClient, submitAiFeedback } from '@/lib/websiteApi';
+import type { AiAnalysis } from '@/lib/websiteApi';
 
 interface RequestData {
   id: string;
@@ -47,10 +55,20 @@ interface RequestData {
   client?: { id: string; name: string; email: string; phone?: string };
 }
 
+interface LinkedProject {
+  id: string;
+  name: string;
+  status: string;
+  project_stage: string | null;
+  budget_total: number | null;
+}
+
 interface RequestDetailData {
   request: RequestData | null;
   messageCount: number;
   matchedProperty: { id: string; name: string } | null;
+  existingAnalysis: AiAnalysis | null;
+  linkedProjects: LinkedProject[];
 }
 
 export default function RequestDetailScreen() {
@@ -60,12 +78,20 @@ export default function RequestDetailScreen() {
   const { colors } = useTheme();
   const { t, locale } = useTranslations();
   const haptics = useHaptics();
+  const { isPlus, isBusiness } = useSubscription();
   const scrollViewRef = useRef<ScrollView>(null);
   const dateLocale = locale === 'es' ? 'es-MX' : 'en-US';
+  const canUseAi = isPlus || isBusiness;
+
+  const REVIEWING_STATUSES = ['reviewing', 'contacted', 'quoted', 'needs_info'];
+  const ACCEPTED_STATUSES = ['accepted', 'converted'];
 
   const statusColors = useMemo<Record<string, { bg: string; text: string }>>(() => ({
     new: { bg: colors.statusNew + '20', text: colors.statusNew },
     reviewing: { bg: colors.warningLight, text: colors.warning },
+    contacted: { bg: colors.warningLight, text: colors.warning },
+    quoted: { bg: colors.warningLight, text: colors.warning },
+    needs_info: { bg: colors.warningLight, text: colors.warning },
     accepted: { bg: colors.successLight, text: colors.success },
     converted: { bg: colors.successLight, text: colors.success },
     declined: { bg: colors.surfaceSecondary, text: colors.textTertiary },
@@ -113,10 +139,39 @@ export default function RequestDetailScreen() {
         }
       }
 
+      // Fetch linked projects
+      let linkedProjects: LinkedProject[] = [];
+      try {
+        const { data: projData } = await (supabase.from('projects') as any)
+          .select('id, name, status, project_stage, budget_total')
+          .eq('request_id', id as string)
+          .order('created_at', { ascending: false });
+        if (projData) linkedProjects = projData;
+      } catch {
+        // No linked projects — that's fine
+      }
+
+      // Fetch existing AI analysis
+      let existingAnalysis: AiAnalysis | null = null;
+      try {
+        const { data: analysisData } = await (supabase.from('ai_analyses') as any)
+          .select('*')
+          .eq('request_id', id as string)
+          .eq('status', 'completed')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+        if (analysisData) existingAnalysis = analysisData;
+      } catch {
+        // No existing analysis — that's fine
+      }
+
       return {
         request: req as RequestData,
         messageCount: msgCount,
         matchedProperty: matched,
+        existingAnalysis,
+        linkedProjects,
       };
     },
     { enabled: !!id },
@@ -125,6 +180,8 @@ export default function RequestDetailScreen() {
 
   const request = requestData?.request ?? null;
   const messageCount = requestData?.messageCount ?? 0;
+  const linkedProjects = requestData?.linkedProjects ?? [];
+  const hasLinkedProject = linkedProjects.length > 0;
   const [matchedProperty, setMatchedProperty] = useState<{
     id: string;
     name: string;
@@ -132,12 +189,29 @@ export default function RequestDetailScreen() {
   const [propertySaved, setPropertySaved] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
 
+  // AI state
+  const [aiAnalysis, setAiAnalysis] = useState<AiAnalysis | null>(null);
+  const [aiAnalyzing, setAiAnalyzing] = useState(false);
+  const [aiCollapsed, setAiCollapsed] = useState(false);
+  const [aiDrafting, setAiDrafting] = useState(false);
+  const [aiResponding, setAiResponding] = useState(false);
+  const [showFollowUpModal, setShowFollowUpModal] = useState(false);
+  const [followUpDraft, setFollowUpDraft] = useState('');
+
   // Sync matchedProperty from requestData into local state so save-property can update it
   useEffect(() => {
     if (requestData?.matchedProperty) {
       setMatchedProperty(requestData.matchedProperty);
     }
   }, [requestData?.matchedProperty]);
+
+  // Restore existing AI analysis (show collapsed)
+  useEffect(() => {
+    if (requestData?.existingAnalysis && !aiAnalysis) {
+      setAiAnalysis(requestData.existingAnalysis);
+      setAiCollapsed(true);
+    }
+  }, [requestData?.existingAnalysis]);
 
   // Confirm dialog state
   const [confirmVisible, setConfirmVisible] = useState(false);
@@ -173,7 +247,7 @@ export default function RequestDetailScreen() {
       });
       if (error) throw error;
       haptics.notification(Haptics.NotificationFeedbackType.Success);
-      showToast('success', t('requestDetail.statusUpdated'));
+      showToast('success', confirmAction === 'archived' ? t('requests.markedComplete') : t('requestDetail.statusUpdated'));
       refresh();
     } catch (error: any) {
       secureLog.error('Error updating request status:', error);
@@ -188,7 +262,7 @@ export default function RequestDetailScreen() {
       case 'reviewing': return t('requestDetail.confirmReview');
       case 'accepted': return t('requestDetail.confirmAccept');
       case 'declined': return t('requestDetail.confirmDecline');
-      case 'archived': return t('requestDetail.confirmArchive');
+      case 'archived': return t('requestDetail.confirmMarkComplete');
       default: return '';
     }
   };
@@ -196,17 +270,21 @@ export default function RequestDetailScreen() {
   const handleConvertToProject = async () => {
     if (!request || !user) return;
     try {
-      const { error } = await supabase.from('projects').insert({
+      const { data: newProject, error } = await supabase.from('projects').insert({
         name: request.title,
         description: request.description || request.project_description || null,
         client_id: request.client_id,
         status: 'active',
+        request_id: request.id,
         user_id: user.id,
-      });
+      } as any).select('id').single();
       if (error) throw error;
       haptics.notification(Haptics.NotificationFeedbackType.Success);
       showToast('success', t('requests.convertSuccess'));
-      router.push('/(app)/projects' as any);
+      refresh();
+      if (newProject) {
+        router.push({ pathname: '/(app)/project-detail', params: { id: newProject.id } } as any);
+      }
     } catch (error) {
       secureLog.error('Error creating project:', error);
       showToast('error', t('requests.convertError'));
@@ -245,6 +323,118 @@ export default function RequestDetailScreen() {
       showToast('error', t('requestDetail.propertySaveError'));
     }
   };
+
+  // ================================================================
+  // AI ACTIONS
+  // ================================================================
+  const handleAiAnalyze = async () => {
+    if (!request) return;
+    setAiAnalyzing(true);
+    try {
+      const { analysis } = await analyzeRequest(request.id);
+      setAiAnalysis(analysis);
+      haptics.notification(Haptics.NotificationFeedbackType.Success);
+    } catch (error: any) {
+      secureLog.error('AI analysis error:', error);
+      showToast('error', error.message || t('ai.analysisError'));
+    } finally {
+      setAiAnalyzing(false);
+    }
+  };
+
+  const handleAiDraftProject = async () => {
+    if (!request || !user || !aiAnalysis) return;
+    setAiDrafting(true);
+    try {
+      const { draft } = await draftProject(request.id, aiAnalysis.id);
+      // Create the project in DB
+      const { data: newProject, error: projError } = await supabase.from('projects').insert({
+        name: draft.name,
+        description: draft.description,
+        client_id: request.client_id,
+        status: 'active',
+        project_stage: 'planning',
+        budget_total: draft.budgetTotal,
+        estimated_duration_days: draft.estimatedDurationDays,
+        request_id: request.id,
+        user_id: user.id,
+      } as any).select('id').single();
+      if (projError) throw projError;
+      // Insert line items
+      if (draft.lineItems?.length && newProject) {
+        const items = draft.lineItems.map((li) => ({
+          project_id: newProject.id,
+          item_type: li.type,
+          description: li.description,
+          quantity: 1,
+          unit_price: li.amount,
+          total_price: li.amount,
+        }));
+        await supabase.from('project_line_items').insert(items as any);
+      }
+      haptics.notification(Haptics.NotificationFeedbackType.Success);
+      showToast('success', t('ai.projectCreated'));
+      router.push({ pathname: '/(app)/project-detail', params: { id: newProject.id } } as any);
+    } catch (error: any) {
+      secureLog.error('AI draft project error:', error);
+      showToast('error', error.message || t('ai.draftError'));
+    } finally {
+      setAiDrafting(false);
+    }
+  };
+
+  const handleAiFollowUp = async () => {
+    if (!request) return;
+    setAiResponding(true);
+    try {
+      const { draft } = await respondToClient(request.id);
+      setFollowUpDraft(draft || '');
+      setShowFollowUpModal(true);
+    } catch (error: any) {
+      secureLog.error('AI follow-up error:', error);
+      showToast('error', error.message || t('ai.respondError'));
+    } finally {
+      setAiResponding(false);
+    }
+  };
+
+  const handleSendFollowUp = async () => {
+    if (!request || !followUpDraft.trim()) return;
+    setAiResponding(true);
+    try {
+      await respondToClient(request.id, followUpDraft.trim(), true);
+      haptics.notification(Haptics.NotificationFeedbackType.Success);
+      showToast('success', t('ai.followUpSent'));
+      setShowFollowUpModal(false);
+      setFollowUpDraft('');
+      refresh();
+    } catch (error: any) {
+      secureLog.error('AI send follow-up error:', error);
+      showToast('error', error.message || t('ai.respondError'));
+    } finally {
+      setAiResponding(false);
+    }
+  };
+
+  const handleAiFeedback = async (feedback: 'helpful' | 'not_helpful') => {
+    if (!aiAnalysis) return;
+    try {
+      await submitAiFeedback(aiAnalysis.id, feedback);
+      setAiAnalysis({ ...aiAnalysis, feedback });
+      showToast('success', t('ai.thanksFeedback'));
+    } catch (error: any) {
+      secureLog.error('AI feedback error:', error);
+    }
+  };
+
+  const toggleAiCollapsed = () => setAiCollapsed(prev => !prev);
+
+  const sentimentColors = useMemo<Record<string, { bg: string; text: string }>>(() => ({
+    positive: { bg: colors.successLight, text: colors.success },
+    neutral: { bg: colors.infoLight, text: colors.info },
+    cautious: { bg: colors.warningLight, text: colors.warning },
+    urgent: { bg: colors.errorLight || colors.warningLight, text: colors.error },
+  }), [colors]);
 
   // ================================================================
   // FORMATTING
@@ -311,8 +501,8 @@ export default function RequestDetailScreen() {
   const clientPhone = (request.client as any)?.phone || request.phone;
   const desc = request.project_description || request.description;
   const budget = request.budget_range || request.budget;
-  const isActive = request.status === 'new' || request.status === 'reviewing';
-  const isAccepted = request.status === 'accepted' || request.status === 'converted';
+  const isActive = request.status === 'new' || REVIEWING_STATUSES.includes(request.status);
+  const isAccepted = ACCEPTED_STATUSES.includes(request.status);
 
   // ================================================================
   // RENDER
@@ -458,6 +648,53 @@ export default function RequestDetailScreen() {
           </TouchableOpacity>
         ) : null}
 
+        {/* Linked Projects */}
+        {linkedProjects.length > 0 && (
+          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="folder-open-outline" size={18} color={colors.text} />
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                {t('requestDetail.linkedProjects')} ({linkedProjects.length})
+              </Text>
+            </View>
+            {linkedProjects.map((proj) => {
+              const stageKey = proj.project_stage === 'completed' ? 'completed'
+                : proj.project_stage === 'in_progress' ? 'in_progress'
+                : proj.status === 'archived' ? 'archived'
+                : 'planning';
+              const stageColors = stageKey === 'completed'
+                ? { bg: colors.successLight, text: colors.success }
+                : stageKey === 'in_progress'
+                ? { bg: colors.infoLight, text: colors.info }
+                : stageKey === 'archived'
+                ? { bg: colors.surfaceSecondary, text: colors.textTertiary }
+                : { bg: colors.warningLight, text: colors.warning };
+              return (
+                <TouchableOpacity
+                  key={proj.id}
+                  style={[styles.linkedProjectItem, { backgroundColor: colors.background, borderColor: colors.border }]}
+                  onPress={() => router.push({ pathname: '/(app)/project-detail', params: { id: proj.id } } as any)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.linkedProjectRow}>
+                    <Text style={[styles.linkedProjectName, { color: colors.text }]} numberOfLines={1}>{proj.name}</Text>
+                    <View style={[styles.linkedProjectBadge, { backgroundColor: stageColors.bg }]}>
+                      <Text style={[styles.linkedProjectBadgeText, { color: stageColors.text }]}>
+                        {t(`requestDetail.projectStage.${stageKey}`)}
+                      </Text>
+                    </View>
+                  </View>
+                  {proj.budget_total != null && (
+                    <Text style={[styles.linkedProjectBudget, { color: colors.textSecondary }]}>
+                      ${proj.budget_total.toLocaleString()}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+
         {/* Action Buttons */}
         {isActive && (
           <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -471,12 +708,14 @@ export default function RequestDetailScreen() {
                   style={styles.actionButton}
                 />
               )}
-              <Button
-                title={t('requestDetail.createProposal')}
-                onPress={handleConvertToProject}
-                variant="secondary"
-                style={styles.actionButton}
-              />
+              {!hasLinkedProject && (
+                <Button
+                  title={t('requestDetail.createProposal')}
+                  onPress={handleConvertToProject}
+                  variant="secondary"
+                  style={styles.actionButton}
+                />
+              )}
               <Button
                 title={t('requests.requestInfo')}
                 onPress={openMessages}
@@ -503,11 +742,13 @@ export default function RequestDetailScreen() {
         {isAccepted && (
           <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <View style={styles.actionGrid}>
-              <Button
-                title={t('requestDetail.createProposal')}
-                onPress={handleConvertToProject}
-                style={styles.actionButton}
-              />
+              {!hasLinkedProject && (
+                <Button
+                  title={t('requestDetail.createProposal')}
+                  onPress={handleConvertToProject}
+                  style={styles.actionButton}
+                />
+              )}
               <Button
                 title={t('requests.requestInfo')}
                 onPress={openMessages}
@@ -515,13 +756,170 @@ export default function RequestDetailScreen() {
                 style={styles.actionButton}
               />
               <Button
-                title={t('requestDetail.archive')}
+                title={t('requestDetail.markComplete')}
                 onPress={() => promptStatusUpdate('archived')}
                 variant="secondary"
                 loading={updatingStatus}
                 style={styles.actionButton}
               />
             </View>
+          </View>
+        )}
+
+        {/* AI Analysis Section */}
+        {canUseAi && (isActive || isAccepted) && !aiAnalysis && (
+          <TouchableOpacity
+            style={[styles.aiAnalyzeButton, { backgroundColor: colors.primary + '12', borderColor: colors.primary + '30' }]}
+            onPress={handleAiAnalyze}
+            disabled={aiAnalyzing}
+          >
+            {aiAnalyzing ? (
+              <>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={[styles.aiAnalyzeText, { color: colors.primary }]}>{t('ai.analyzing')}</Text>
+              </>
+            ) : (
+              <>
+                <Ionicons name="sparkles" size={20} color={colors.primary} />
+                <Text style={[styles.aiAnalyzeText, { color: colors.primary }]}>{t('ai.analyzeWithAi')}</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
+
+        {!canUseAi && (isActive || isAccepted) && (
+          <View style={[styles.aiUpgradeCard, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+            <Ionicons name="sparkles-outline" size={20} color={colors.textTertiary} />
+            <View style={styles.aiUpgradeContent}>
+              <Text style={[styles.aiUpgradeTitle, { color: colors.text }]}>{t('ai.upgradeRequired')}</Text>
+              <Text style={[styles.aiUpgradeDesc, { color: colors.textSecondary }]}>{t('ai.upgradeRequiredDesc')}</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.aiUpgradeBtn, { backgroundColor: colors.primary }]}
+              onPress={() => router.push('/(app)/plans' as any)}
+            >
+              <Text style={styles.aiUpgradeBtnText}>{t('ai.upgrade')}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {aiAnalysis && (
+          <View style={[styles.aiCard, { backgroundColor: colors.surface, borderColor: colors.primary + '30' }]}>
+            {/* Collapsible Header */}
+            <TouchableOpacity style={styles.aiCardHeader} onPress={toggleAiCollapsed} activeOpacity={0.7}>
+              <View style={styles.aiCardHeaderLeft}>
+                <Ionicons name="sparkles" size={18} color={colors.primary} />
+                <Text style={[styles.aiCardTitle, { color: colors.text }]}>{t('ai.analysisComplete')}</Text>
+              </View>
+              <Ionicons name={aiCollapsed ? 'chevron-down' : 'chevron-up'} size={20} color={colors.textTertiary} />
+            </TouchableOpacity>
+
+            {!aiCollapsed && (
+              <>
+                {/* Summary */}
+                <Text style={[styles.aiSummary, { color: colors.textSecondary }]}>{aiAnalysis.summary}</Text>
+
+                {/* Metrics Row */}
+                <View style={styles.aiMetricsRow}>
+                  <View style={[styles.aiMetric, { backgroundColor: (sentimentColors[aiAnalysis.sentiment] || sentimentColors.neutral).bg }]}>
+                    <Text style={[styles.aiMetricLabel, { color: colors.textTertiary }]}>{t('ai.sentiment')}</Text>
+                    <Text style={[styles.aiMetricValue, { color: (sentimentColors[aiAnalysis.sentiment] || sentimentColors.neutral).text }]}>
+                      {t(`ai.sentiment${aiAnalysis.sentiment.charAt(0).toUpperCase() + aiAnalysis.sentiment.slice(1)}`)}
+                    </Text>
+                  </View>
+                  <View style={[styles.aiMetric, { backgroundColor: colors.infoLight }]}>
+                    <Text style={[styles.aiMetricLabel, { color: colors.textTertiary }]}>{t('ai.estimatedValue')}</Text>
+                    <Text style={[styles.aiMetricValue, { color: colors.text }]}>{aiAnalysis.estimated_value || '—'}</Text>
+                  </View>
+                  <View style={[styles.aiMetric, { backgroundColor: colors.warningLight }]}>
+                    <Text style={[styles.aiMetricLabel, { color: colors.textTertiary }]}>{t('ai.priorityScore')}</Text>
+                    <Text style={[styles.aiMetricValue, { color: colors.text }]}>{aiAnalysis.priority_score}/10</Text>
+                  </View>
+                </View>
+
+                {/* Recommended Actions */}
+                {aiAnalysis.recommended_actions?.length > 0 && (
+                  <View style={styles.aiSection}>
+                    <Text style={[styles.aiSectionTitle, { color: colors.text }]}>{t('ai.recommendedActions')}</Text>
+                    {aiAnalysis.recommended_actions.map((action, idx) => (
+                      <View key={idx} style={[styles.aiActionItem, { backgroundColor: colors.background }]}>
+                        <Ionicons name="checkmark-circle-outline" size={16} color={colors.primary} style={{ marginTop: 2 }} />
+                        <View style={styles.aiActionContent}>
+                          <Text style={[styles.aiActionText, { color: colors.text }]}>{action.action}</Text>
+                          <Text style={[styles.aiActionReason, { color: colors.textTertiary }]}>{action.reason}</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {/* Follow-up Questions */}
+                {aiAnalysis.follow_up_questions?.length > 0 && (
+                  <View style={styles.aiSection}>
+                    <Text style={[styles.aiSectionTitle, { color: colors.text }]}>{t('ai.followUpQuestions')}</Text>
+                    <View style={styles.aiQuestionChips}>
+                      {aiAnalysis.follow_up_questions.map((q, idx) => (
+                        <View key={idx} style={[styles.aiQuestionChip, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                          <Text style={[styles.aiQuestionText, { color: colors.textSecondary }]}>{q}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+                {/* AI Action Buttons */}
+                <View style={styles.aiActionsColumn}>
+                  {!aiAnalysis.project_created && !hasLinkedProject && (
+                    <TouchableOpacity
+                      style={[styles.aiActionBtn, { backgroundColor: colors.primary }]}
+                      onPress={handleAiDraftProject}
+                      disabled={aiDrafting}
+                    >
+                      {aiDrafting ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <>
+                          <Ionicons name="folder-outline" size={16} color="#fff" />
+                          <Text style={styles.aiActionBtnText}>{t('ai.draftProjectWithAi')}</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity
+                    style={[styles.aiActionBtn, { backgroundColor: colors.info }]}
+                    onPress={handleAiFollowUp}
+                    disabled={aiResponding}
+                  >
+                    {aiResponding && !showFollowUpModal ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Ionicons name="send-outline" size={16} color="#fff" />
+                        <Text style={styles.aiActionBtnText}>{t('ai.draftFollowUp')}</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+
+                {/* Feedback */}
+                {!aiAnalysis.feedback ? (
+                  <View style={[styles.aiFeedbackRow, { borderTopColor: colors.borderLight }]}>
+                    <TouchableOpacity style={[styles.aiFeedbackBtn, { borderColor: colors.border }]} onPress={() => handleAiFeedback('helpful')}>
+                      <Ionicons name="thumbs-up-outline" size={16} color={colors.success} />
+                      <Text style={[styles.aiFeedbackText, { color: colors.textSecondary }]}>{t('ai.helpful')}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.aiFeedbackBtn, { borderColor: colors.border }]} onPress={() => handleAiFeedback('not_helpful')}>
+                      <Ionicons name="thumbs-down-outline" size={16} color={colors.error} />
+                      <Text style={[styles.aiFeedbackText, { color: colors.textSecondary }]}>{t('ai.notHelpful')}</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View style={[styles.aiFeedbackRow, { borderTopColor: colors.borderLight }]}>
+                    <Text style={[styles.aiFeedbackThanks, { color: colors.textTertiary }]}>{t('ai.thanksFeedback')}</Text>
+                  </View>
+                )}
+              </>
+            )}
           </View>
         )}
 
@@ -556,6 +954,59 @@ export default function RequestDetailScreen() {
       </ScrollView>
 
       {/* Confirm Dialog */}
+      {/* Follow-up Compose Modal */}
+      <RNModal
+        visible={showFollowUpModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowFollowUpModal(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.followUpOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <TouchableOpacity
+            style={{ flex: 1 }}
+            activeOpacity={1}
+            onPress={() => setShowFollowUpModal(false)}
+          />
+          <View style={[styles.followUpSheet, { backgroundColor: colors.surface }]}>
+            <View style={styles.followUpHeader}>
+              <Text style={[styles.followUpTitle, { color: colors.text }]}>{t('ai.followUpDraft')}</Text>
+              <TouchableOpacity onPress={() => setShowFollowUpModal(false)}>
+                <Ionicons name="close" size={24} color={colors.textTertiary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.followUpScrollArea} keyboardShouldPersistTaps="handled">
+              <TextInput
+                style={[styles.followUpInput, { backgroundColor: colors.background, borderColor: colors.border, color: colors.text }]}
+                value={followUpDraft}
+                onChangeText={setFollowUpDraft}
+                placeholder={t('ai.followUpPlaceholder')}
+                placeholderTextColor={colors.textTertiary}
+                multiline
+                textAlignVertical="top"
+                scrollEnabled={false}
+              />
+            </ScrollView>
+            <TouchableOpacity
+              style={[styles.followUpSendBtn, { backgroundColor: colors.primary }, aiResponding && { opacity: 0.7 }]}
+              onPress={handleSendFollowUp}
+              disabled={aiResponding || !followUpDraft.trim()}
+            >
+              {aiResponding ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="send" size={18} color="#fff" />
+                  <Text style={styles.followUpSendText}>{t('ai.editAndSend')}</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </RNModal>
+
       <ConfirmDialog
         visible={confirmVisible}
         title={t('requestDetail.confirmTitle')}
@@ -661,6 +1112,28 @@ const styles = StyleSheet.create({
   },
   savePropertyText: { fontSize: FontSizes.sm, fontWeight: '600' },
 
+  // Linked Projects
+  linkedProjectItem: {
+    padding: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    marginBottom: Spacing.sm,
+  },
+  linkedProjectRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.sm,
+  },
+  linkedProjectName: { fontSize: FontSizes.sm, fontWeight: '600', flex: 1 },
+  linkedProjectBadge: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
+  },
+  linkedProjectBadgeText: { fontSize: 10, fontWeight: '600' },
+  linkedProjectBudget: { fontSize: FontSizes.xs, marginTop: 4 },
+
   // Description
   descriptionText: { fontSize: FontSizes.sm, lineHeight: 22 },
 
@@ -691,4 +1164,159 @@ const styles = StyleSheet.create({
   // Metadata
   metadataFooter: { paddingVertical: Spacing.md, alignItems: 'center' },
   metadataText: { fontSize: FontSizes.xs },
+
+  // AI Analyze button
+  aiAnalyzeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.xl,
+    borderWidth: 1,
+    marginBottom: Spacing.md,
+  },
+  aiAnalyzeText: { fontSize: FontSizes.sm, fontWeight: '600' },
+
+  // AI Upgrade card
+  aiUpgradeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.md,
+    borderRadius: BorderRadius.xl,
+    borderWidth: 1,
+    marginBottom: Spacing.md,
+    gap: Spacing.md,
+  },
+  aiUpgradeContent: { flex: 1 },
+  aiUpgradeTitle: { fontSize: FontSizes.xs, fontWeight: '700' },
+  aiUpgradeDesc: { fontSize: FontSizes.xs, lineHeight: 16, marginTop: 2 },
+  aiUpgradeBtn: { paddingVertical: Spacing.sm, paddingHorizontal: Spacing.md, borderRadius: BorderRadius.lg },
+  aiUpgradeBtnText: { color: '#fff', fontSize: FontSizes.xs, fontWeight: '700' },
+
+  // AI Analysis card
+  aiCard: {
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+    marginBottom: Spacing.md,
+    borderWidth: 1,
+  },
+  aiCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.md,
+  },
+  aiCardHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  aiCardTitle: { fontSize: FontSizes.md, fontWeight: '600' },
+  aiSummary: { fontSize: FontSizes.sm, lineHeight: 20, marginBottom: Spacing.md },
+
+  // Metrics
+  aiMetricsRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md },
+  aiMetric: {
+    flex: 1,
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.lg,
+    alignItems: 'center',
+  },
+  aiMetricLabel: { fontSize: 10, fontWeight: '500', marginBottom: 2 },
+  aiMetricValue: { fontSize: FontSizes.xs, fontWeight: '700' },
+
+  // Actions & Questions
+  aiSection: { marginBottom: Spacing.md },
+  aiSectionTitle: { fontSize: FontSizes.sm, fontWeight: '600', marginBottom: Spacing.sm },
+  aiActionItem: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    marginBottom: Spacing.xs,
+  },
+  aiActionContent: { flex: 1 },
+  aiActionText: { fontSize: FontSizes.sm, fontWeight: '500' },
+  aiActionReason: { fontSize: FontSizes.xs, lineHeight: 16, marginTop: 2 },
+  aiQuestionChips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, paddingHorizontal: Spacing.sm },
+  aiQuestionChip: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  aiQuestionText: { fontSize: FontSizes.xs },
+
+  // AI Action buttons
+  aiActionsColumn: { gap: Spacing.sm, marginBottom: Spacing.md },
+  aiActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.lg,
+    minHeight: 40,
+  },
+  aiActionBtnText: { color: '#fff', fontSize: FontSizes.sm, fontWeight: '600' },
+
+  // Feedback
+  aiFeedbackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.md,
+    paddingTop: Spacing.md,
+    borderTopWidth: 1,
+  },
+  aiFeedbackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  aiFeedbackText: { fontSize: FontSizes.xs },
+  aiFeedbackThanks: { fontSize: FontSizes.xs, fontStyle: 'italic' },
+
+  // Follow-up modal
+  followUpOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  followUpSheet: {
+    borderTopLeftRadius: BorderRadius['2xl'],
+    borderTopRightRadius: BorderRadius['2xl'],
+    padding: Spacing.lg,
+    maxHeight: '80%',
+  },
+  followUpHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.md,
+  },
+  followUpTitle: { fontSize: FontSizes.lg, fontWeight: '600' },
+  followUpScrollArea: {
+    maxHeight: 300,
+  },
+  followUpInput: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
+    fontSize: FontSizes.sm,
+    minHeight: 160,
+    lineHeight: 22,
+  },
+  followUpSendBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    marginTop: Spacing.md,
+    minHeight: 48,
+  },
+  followUpSendText: { color: '#fff', fontSize: FontSizes.md, fontWeight: '600' },
 });

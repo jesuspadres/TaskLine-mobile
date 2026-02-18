@@ -42,6 +42,11 @@ interface SchedulingSettings {
   send_email_confirmation: boolean;
   send_sms_confirmation: boolean;
   allow_client_edits: boolean;
+  reminder_enabled: boolean;
+  reminder_hours_before: number;
+  reminder_email_enabled: boolean;
+  reminder_sms_enabled: boolean;
+  reminder_message: string;
 }
 
 interface AvailabilityRule {
@@ -115,6 +120,16 @@ const PRICE_TYPES = [
   { key: 'quote', i18nKey: 'bookingSettings.custom' },
 ];
 
+const REMINDER_HOURS_OPTIONS = [
+  { key: 2, i18nLabel: '2', i18nUnit: 'bookingSettings.hours' },
+  { key: 4, i18nLabel: '4', i18nUnit: 'bookingSettings.hours' },
+  { key: 6, i18nLabel: '6', i18nUnit: 'bookingSettings.hours' },
+  { key: 12, i18nLabel: '12', i18nUnit: 'bookingSettings.hours' },
+  { key: 24, i18nLabel: '24', i18nUnit: 'bookingSettings.hours' },
+  { key: 48, i18nLabel: '48', i18nUnit: 'bookingSettings.hours' },
+  { key: 72, i18nLabel: '72', i18nUnit: 'bookingSettings.hours' },
+];
+
 const TIME_SLOTS: string[] = [];
 for (let h = 6; h <= 22; h++) {
   TIME_SLOTS.push(`${h.toString().padStart(2, '0')}:00`);
@@ -145,6 +160,11 @@ const DEFAULT_SETTINGS: SchedulingSettings = {
   send_email_confirmation: true,
   send_sms_confirmation: false,
   allow_client_edits: false,
+  reminder_enabled: false,
+  reminder_hours_before: 24,
+  reminder_email_enabled: true,
+  reminder_sms_enabled: false,
+  reminder_message: '',
 };
 
 function getDefaultAvailability(): AvailabilityRule[] {
@@ -189,6 +209,7 @@ export default function BookingSettingsScreen() {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     basic: true,
     options: false,
+    reminders: false,
     availability: false,
     timeoff: false,
     services: false,
@@ -254,6 +275,11 @@ export default function BookingSettingsScreen() {
           send_email_confirmation: settingsData.send_email_confirmation ?? DEFAULT_SETTINGS.send_email_confirmation,
           send_sms_confirmation: settingsData.send_sms_confirmation ?? DEFAULT_SETTINGS.send_sms_confirmation,
           allow_client_edits: settingsData.allow_client_edits ?? DEFAULT_SETTINGS.allow_client_edits,
+          reminder_enabled: settingsData.reminder_enabled ?? DEFAULT_SETTINGS.reminder_enabled,
+          reminder_hours_before: settingsData.reminder_hours_before ?? DEFAULT_SETTINGS.reminder_hours_before,
+          reminder_email_enabled: settingsData.reminder_email_enabled ?? DEFAULT_SETTINGS.reminder_email_enabled,
+          reminder_sms_enabled: settingsData.reminder_sms_enabled ?? DEFAULT_SETTINGS.reminder_sms_enabled,
+          reminder_message: settingsData.reminder_message ?? DEFAULT_SETTINGS.reminder_message,
         });
       }
 
@@ -353,6 +379,11 @@ export default function BookingSettingsScreen() {
           send_email_confirmation: settings.send_email_confirmation,
           send_sms_confirmation: settings.send_sms_confirmation,
           allow_client_edits: settings.allow_client_edits,
+          reminder_enabled: settings.reminder_enabled,
+          reminder_hours_before: settings.reminder_hours_before,
+          reminder_email_enabled: settings.reminder_email_enabled,
+          reminder_sms_enabled: settings.reminder_sms_enabled,
+          reminder_message: settings.reminder_message || null,
           updated_at: new Date().toISOString(),
         } as any,
         { onConflict: 'user_id' }
@@ -900,6 +931,87 @@ export default function BookingSettingsScreen() {
                 settings.allow_client_edits,
                 (v) => updateSetting('allow_client_edits', v),
                 true
+              )}
+            </View>
+          )}
+
+          {/* ── Section: Appointment Reminders ──────────────────── */}
+          {renderSectionHeader('reminders', 'notifications-outline', t('bookingSettings.appointmentReminders'))}
+          {expandedSections.reminders && (
+            <View style={[styles.sectionContent, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              {/* Master reminder toggle */}
+              <View style={[styles.switchRow, { borderBottomColor: colors.borderLight, borderBottomWidth: 1 }]}>
+                <View style={{ flex: 1, marginRight: Spacing.sm }}>
+                  <Text style={[styles.switchLabel, { color: colors.text }]}>
+                    {t('bookingSettings.enableReminders')}
+                  </Text>
+                  <Text style={{ fontSize: FontSizes.xs, color: colors.textSecondary, marginTop: 2 }}>
+                    {t('bookingSettings.enableRemindersDesc')}
+                  </Text>
+                </View>
+                <Switch
+                  value={settings.reminder_enabled}
+                  onValueChange={(v) => updateSetting('reminder_enabled', v)}
+                  trackColor={{ false: colors.border, true: colors.primary + '60' }}
+                  thumbColor={settings.reminder_enabled ? colors.primary : colors.surface}
+                />
+              </View>
+
+              {settings.reminder_enabled && (
+                <>
+                  {/* Reminder hours before */}
+                  {renderPickerRow(
+                    t('bookingSettings.reminderBefore'),
+                    (() => {
+                      const o = REMINDER_HOURS_OPTIONS.find((o) => o.key === settings.reminder_hours_before);
+                      return o ? `${o.i18nLabel} ${t(o.i18nUnit)}` : `${settings.reminder_hours_before}h`;
+                    })(),
+                    () =>
+                      openPicker(
+                        t('bookingSettings.reminderBefore'),
+                        REMINDER_HOURS_OPTIONS.map((o) => ({
+                          key: o.key,
+                          label: `${o.i18nLabel} ${t(o.i18nUnit)}`,
+                        })),
+                        (val) => updateSetting('reminder_hours_before', val)
+                      )
+                  )}
+
+                  {/* Email reminder toggle */}
+                  {renderSwitchRow(
+                    t('bookingSettings.sendEmailReminder'),
+                    settings.reminder_email_enabled,
+                    (v) => updateSetting('reminder_email_enabled', v)
+                  )}
+
+                  {/* SMS reminder toggle */}
+                  {renderSwitchRow(
+                    t('bookingSettings.sendSmsReminder'),
+                    settings.reminder_sms_enabled,
+                    (v) => updateSetting('reminder_sms_enabled', v)
+                  )}
+
+                  {/* Custom reminder message */}
+                  <View style={[styles.reminderMessageContainer, { borderTopColor: colors.borderLight }]}>
+                    <Text style={[styles.inputLabel, { color: colors.text, marginBottom: Spacing.xs }]}>
+                      {t('bookingSettings.customReminderMessage')}
+                    </Text>
+                    <View style={[styles.inputWrapper, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, minHeight: 80 }]}>
+                      <TextInput
+                        style={[styles.input, { color: colors.text, textAlignVertical: 'top', minHeight: 72 }]}
+                        value={settings.reminder_message}
+                        onChangeText={(v) => updateSetting('reminder_message', v)}
+                        placeholder={t('bookingSettings.reminderMessagePlaceholder')}
+                        placeholderTextColor={colors.textTertiary}
+                        multiline
+                        numberOfLines={3}
+                      />
+                    </View>
+                    <Text style={{ fontSize: FontSizes.xs, color: colors.textTertiary, marginTop: 4 }}>
+                      {t('bookingSettings.reminderMessageHint')}
+                    </Text>
+                  </View>
+                </>
               )}
             </View>
           )}
@@ -1631,6 +1743,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     flex: 1,
     marginRight: Spacing.md,
+  },
+
+  // ── Reminders ──────────────────────────────────────────────────
+  reminderMessageContainer: {
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    borderTopWidth: 1,
   },
 
   // ── Availability ─────────────────────────────────────────────────
