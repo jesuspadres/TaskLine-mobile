@@ -36,7 +36,8 @@
   "submit": {
     "production": {
       "android": {
-        "track": "internal"
+        "track": "internal",
+        "serviceAccountKeyPath": "./primeval-falcon-446802-f5-c312ff8e741f.json"
       }
     }
   }

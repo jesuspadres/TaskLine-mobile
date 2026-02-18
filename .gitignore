@@ -31,6 +31,10 @@ yarn-error.*
 .DS_Store
 *.pem
 
+# Service account keys
+*.gserviceaccount*.json
+primeval-falcon-*.json
+
 # Local env files
 .env
 .env.local
@@ -38,7 +42,6 @@ yarn-error.*
 .env.test.local
 .env.production.local
 settings.local.json
-lib/env.ts
 
 # TypeScript
 *.tsbuildinfo
