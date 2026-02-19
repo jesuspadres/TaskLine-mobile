@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { AppState } from 'react-native';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { secureLog } from '@/lib/security';
@@ -17,11 +18,14 @@ interface Notification {
   triggered_by_name: string | null;
 }
 
+let channelCounter = 0;
+
 export function useNotifications() {
   const user = useAuthStore((s) => s.user);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
+  const channelIdRef = useRef(++channelCounter);
 
   const fetchNotifications = useCallback(async (filter: 'all' | 'unread' = 'all') => {
     if (!user) return;
@@ -162,15 +166,27 @@ export function useNotifications() {
     }
   }, []);
 
-  // Set up real-time subscription
+  // Refresh when app comes back to foreground
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && user) {
+        fetchNotifications();
+        fetchUnreadCount();
+      }
+    });
+    return () => subscription.remove();
+  }, [fetchNotifications, fetchUnreadCount, user]);
+
+  // Set up real-time subscription with unique channel name per hook instance
   useEffect(() => {
     if (!user) return;
 
     fetchNotifications();
     fetchUnreadCount();
 
+    const channelName = `notifications_${user.id}_${channelIdRef.current}`;
     const channel = supabase
-      .channel('notifications_changes')
+      .channel(channelName)
       .on(
         'postgres_changes',
         {

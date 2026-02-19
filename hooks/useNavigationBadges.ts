@@ -1,5 +1,8 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { AppState } from 'react-native';
 import { supabase } from '@/lib/supabase';
+import { useAuthStore } from '@/stores/authStore';
+import { secureLog } from '@/lib/security';
 
 interface BadgeCounts {
   requests: number;
@@ -9,44 +12,37 @@ interface BadgeCounts {
 }
 
 export function useNavigationBadges() {
+  const user = useAuthStore((s) => s.user);
   const [counts, setCounts] = useState<BadgeCounts>({
     requests: 0,
     projects: 0,
     tasks: 0,
     notifications: 0,
   });
+  const channelsRef = useRef<ReturnType<typeof supabase.channel>[]>([]);
 
   const fetchCounts = useCallback(async () => {
+    if (!user) return;
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      // Fetch all counts in parallel
       const [requestsResult, projectsResult, tasksResult, notificationsResult] = await Promise.all([
-        // Count new requests (status = 'new')
         supabase
           .from('requests')
           .select('*', { count: 'exact', head: true })
           .eq('status', 'new'),
-
-        // Count projects pending approval
         supabase
           .from('projects')
           .select('*', { count: 'exact', head: true })
           .eq('approval_status', 'pending'),
-
-        // Count high priority incomplete tasks
         supabase
           .from('tasks')
           .select('*', { count: 'exact', head: true })
           .eq('priority', 'high')
           .neq('status', 'completed'),
-
-        // Count unread notifications
         supabase
           .from('notifications')
           .select('*', { count: 'exact', head: true })
-          .eq('is_read', false),
+          .eq('is_read', false)
+          .eq('is_archived', false),
       ]);
 
       setCounts({
@@ -56,95 +52,91 @@ export function useNavigationBadges() {
         notifications: notificationsResult.count || 0,
       });
     } catch (error) {
-      console.error('Error fetching badge counts:', error);
+      secureLog.error('Error fetching badge counts:', error);
     }
-  }, []);
+  }, [user]);
+
+  // Refresh counts when app comes back to foreground
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && user) {
+        fetchCounts();
+      }
+    });
+    return () => subscription.remove();
+  }, [fetchCounts, user]);
 
   useEffect(() => {
+    if (!user) return;
+
     fetchCounts();
 
-    // Set up real-time subscriptions
-    const setupSubscriptions = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+    // Clean up any existing channels before creating new ones
+    channelsRef.current.forEach((ch) => ch.unsubscribe());
+    channelsRef.current = [];
 
-      // Subscribe to requests changes
-      const requestsChannel = supabase
-        .channel('requests_badge_changes')
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'requests',
-            filter: `user_id=eq.${user.id}`,
-          },
-          () => {
-            fetchCounts();
-          }
-        )
-        .subscribe();
+    const requestsChannel = supabase
+      .channel(`requests_badge_${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'requests',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => fetchCounts()
+      )
+      .subscribe();
 
-      // Subscribe to projects changes
-      const projectsChannel = supabase
-        .channel('projects_badge_changes')
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'projects',
-            filter: `user_id=eq.${user.id}`,
-          },
-          () => {
-            fetchCounts();
-          }
-        )
-        .subscribe();
+    const projectsChannel = supabase
+      .channel(`projects_badge_${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'projects',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => fetchCounts()
+      )
+      .subscribe();
 
-      // Subscribe to tasks changes
-      const tasksChannel = supabase
-        .channel('tasks_badge_changes')
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'tasks',
-          },
-          () => {
-            fetchCounts();
-          }
-        )
-        .subscribe();
+    const tasksChannel = supabase
+      .channel(`tasks_badge_${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'tasks',
+        },
+        () => fetchCounts()
+      )
+      .subscribe();
 
-      // Subscribe to notifications changes
-      const notificationsChannel = supabase
-        .channel('notifications_badge_changes')
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'notifications',
-            filter: `user_id=eq.${user.id}`,
-          },
-          () => {
-            fetchCounts();
-          }
-        )
-        .subscribe();
+    const notificationsChannel = supabase
+      .channel(`notifications_badge_${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => fetchCounts()
+      )
+      .subscribe();
 
-      return () => {
-        requestsChannel.unsubscribe();
-        projectsChannel.unsubscribe();
-        tasksChannel.unsubscribe();
-        notificationsChannel.unsubscribe();
-      };
+    channelsRef.current = [requestsChannel, projectsChannel, tasksChannel, notificationsChannel];
+
+    return () => {
+      channelsRef.current.forEach((ch) => ch.unsubscribe());
+      channelsRef.current = [];
     };
-
-    setupSubscriptions();
-  }, [fetchCounts]);
+  }, [user, fetchCounts]);
 
   return {
     counts,
