@@ -34,6 +34,7 @@ yarn-error.*
 # Firebase / service account keys
 google-services.json
 GoogleService-Info.plist
+*-firebase-adminsdk-*.json
 *.gserviceaccount*.json
 primeval-falcon-*.json
 
