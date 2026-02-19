@@ -125,25 +125,32 @@ export default function NotificationSettingsScreen() {
       info.push(`Permission Error: ${e.message}`);
     }
 
+    // Try direct expo-notifications call to get detailed error
     try {
-      info.push('Attempting registration...');
+      info.push('Loading expo-notifications...');
       setDebugInfo([...info]);
-      const token = await registerForPushNotifications();
-      if (token) {
-        info.push(`Token: ${token.substring(0, 30)}...`);
-        if (user?.id) {
-          try {
-            await savePushToken(user.id, token);
-            info.push('Token saved to DB!');
-          } catch (e: any) {
-            info.push(`Save Error: ${e.message}`);
-          }
+      const Notifications = require('expo-notifications');
+      info.push(`Module loaded: ${!!Notifications}`);
+
+      info.push('Getting push token...');
+      setDebugInfo([...info]);
+      const tokenData = await Notifications.getExpoPushTokenAsync({
+        projectId: projectId,
+      });
+      const token = tokenData.data;
+      info.push(`Token: ${token}`);
+
+      if (token && user?.id) {
+        try {
+          await savePushToken(user.id, token);
+          info.push('Token saved to DB!');
+        } catch (e: any) {
+          info.push(`Save Error: ${e.message}`);
         }
-      } else {
-        info.push('Token: null (registration failed)');
       }
     } catch (e: any) {
-      info.push(`Registration Error: ${e.message}`);
+      info.push(`TOKEN ERROR: ${e.message}`);
+      info.push(`Stack: ${(e.stack || '').substring(0, 200)}`);
     }
 
     setDebugInfo(info);
