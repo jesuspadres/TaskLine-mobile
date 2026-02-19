@@ -44,7 +44,10 @@
       "Bash(curl:*)",
       "Bash(npx eas-cli build:*)",
       "Bash(npx eas-cli:*)",
-      "WebFetch(domain:job-logs.eascdn.net)"
+      "WebFetch(domain:job-logs.eascdn.net)",
+      "Bash(echo:*)",
+      "Bash(npx eas build:*)",
+      "Bash(npx eas submit:*)"
     ]
   }
 }

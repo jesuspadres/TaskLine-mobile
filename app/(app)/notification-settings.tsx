@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   Switch,
   ActivityIndicator,
+  Platform,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -17,6 +19,12 @@ import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
 import { showToast } from '@/components';
+import {
+  registerForPushNotifications,
+  savePushToken,
+  getPermissionStatus,
+  isPushSupported,
+} from '@/lib/pushNotifications';
 
 interface NotificationPrefs {
   notify_new_request: boolean;
@@ -77,6 +85,49 @@ export default function NotificationSettingsScreen() {
   const [prefs, setPrefs] = useState<NotificationPrefs>(DEFAULT_PREFS);
   const [loading, setLoading] = useState(true);
   const savingRef = useRef(false);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushChecking, setPushChecking] = useState(true);
+
+  // Check push notification permission status
+  useEffect(() => {
+    const checkPushStatus = async () => {
+      try {
+        const status = await getPermissionStatus();
+        setPushEnabled(status === 'granted');
+      } catch {} finally {
+        setPushChecking(false);
+      }
+    };
+    checkPushStatus();
+  }, []);
+
+  const handleTogglePush = async () => {
+    if (pushEnabled) {
+      // Can't revoke programmatically — send to system settings
+      if (Platform.OS === 'ios') {
+        Linking.openURL('app-settings:');
+      } else {
+        Linking.openSettings();
+      }
+    } else {
+      // Try to request permission
+      const token = await registerForPushNotifications();
+      if (token) {
+        setPushEnabled(true);
+        if (user?.id) {
+          await savePushToken(user.id, token);
+        }
+        showToast('success', t('notificationSettings.pushEnabled'));
+      } else {
+        // Permission denied — send to system settings
+        if (Platform.OS === 'ios') {
+          Linking.openURL('app-settings:');
+        } else {
+          Linking.openSettings();
+        }
+      }
+    }
+  };
 
   // Load preferences on mount
   useEffect(() => {
@@ -253,6 +304,52 @@ export default function NotificationSettingsScreen() {
           </Text>
         </View>
 
+        {/* Push Notifications Section — only shown on physical devices outside Expo Go */}
+        {Platform.OS !== 'web' && isPushSupported() && (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.textTertiary }]}>
+              {t('notificationSettings.pushSection')}
+            </Text>
+            <View
+              style={[
+                styles.sectionContent,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <View style={[styles.settingItem, styles.lastItem]}>
+                <View
+                  style={[styles.iconContainer, { backgroundColor: colors.infoLight }]}
+                >
+                  <Ionicons name="notifications-outline" size={20} color={colors.primary} />
+                </View>
+                <View style={styles.itemContent}>
+                  <Text style={[styles.itemTitle, { color: colors.text }]}>
+                    {t('notificationSettings.pushNotifications')}
+                  </Text>
+                  <Text style={[styles.pushStatusText, { color: colors.textTertiary }]}>
+                    {pushEnabled
+                      ? t('notificationSettings.pushEnabledStatus')
+                      : t('notificationSettings.pushDisabledStatus')}
+                  </Text>
+                </View>
+                {pushChecking ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Switch
+                    value={pushEnabled}
+                    onValueChange={handleTogglePush}
+                    trackColor={{
+                      false: colors.border,
+                      true: colors.primary + '60',
+                    }}
+                    thumbColor={pushEnabled ? colors.primary : colors.surface}
+                  />
+                )}
+              </View>
+            </View>
+          </View>
+        )}
+
         {/* In-App Notifications Section */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.textTertiary }]}>
@@ -365,5 +462,9 @@ const styles = StyleSheet.create({
   itemTitle: {
     fontSize: FontSizes.md,
     fontWeight: '500',
+  },
+  pushStatusText: {
+    fontSize: FontSizes.xs,
+    marginTop: 2,
   },
 });

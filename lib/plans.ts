@@ -11,11 +11,11 @@ export interface PlanFeatures {
   projects: string;
   tasks: string;
   storage: string;
-  sms: string;
+  sms: boolean | string;
   support: string;
   payments: boolean | 'comingSoon';
   scheduler: boolean;
-  productCatalog: boolean;
+  productCatalog: boolean | string;
   branding: boolean | 'comingSoon';
   whiteLabel: boolean;
   team: string;
@@ -73,7 +73,7 @@ export const PLANS: PlanData[] = [
   {
     nameKey: 'planNames.pro',
     slug: 'pro',
-    price: { monthly: 19, annual: 15 },
+    price: { monthly: 29, annual: 19 },
     descriptionKey: 'planDescriptions.pro',
     features: {
       clients: 'featureValues.unlimited',
@@ -84,7 +84,7 @@ export const PLANS: PlanData[] = [
       support: 'supportLevels.priority',
       payments: false,
       scheduler: true,
-      productCatalog: false,
+      productCatalog: 'featureValues.upTo6',
       branding: false,
       whiteLabel: false,
       team: '\u2014',
@@ -100,7 +100,7 @@ export const PLANS: PlanData[] = [
   {
     nameKey: 'planNames.plus',
     slug: 'plus',
-    price: { monthly: 39, annual: 30 },
+    price: { monthly: 59, annual: 49 },
     descriptionKey: 'planDescriptions.plus',
     popular: true,
     features: {
@@ -108,11 +108,11 @@ export const PLANS: PlanData[] = [
       projects: 'featureValues.unlimited',
       tasks: 'featureValues.unlimited',
       storage: '30GB',
-      sms: '200/month',
+      sms: true,
       support: 'supportLevels.priority',
-      payments: 'comingSoon',
+      payments: true,
       scheduler: true,
-      productCatalog: true,
+      productCatalog: 'featureValues.unlimited',
       branding: 'comingSoon',
       whiteLabel: false,
       team: '\u2014',
@@ -128,7 +128,7 @@ export const PLANS: PlanData[] = [
   {
     nameKey: 'planNames.business',
     slug: 'business',
-    price: { monthly: 79, annual: 60 },
+    price: { monthly: 119, annual: 99 },
     descriptionKey: 'planDescriptions.business',
     comingSoon: true,
     features: {
@@ -136,14 +136,14 @@ export const PLANS: PlanData[] = [
       projects: 'featureValues.unlimited',
       tasks: 'featureValues.unlimited',
       storage: '100GB',
-      sms: '1,000/month',
+      sms: true,
       support: 'supportLevels.phone',
       payments: true,
       scheduler: true,
-      productCatalog: true,
+      productCatalog: 'featureValues.unlimited',
       branding: true,
       whiteLabel: true,
-      team: 'featureValues.unlimited',
+      team: 'featureValues.upTo5',
       clientPortal: true,
       invoices: true,
       projectTracking: true,

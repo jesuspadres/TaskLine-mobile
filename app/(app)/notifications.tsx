@@ -20,18 +20,196 @@ import { Spacing, FontSizes, BorderRadius, Shadows } from '@/constants/theme';
 
 function getNotificationIcon(type: string): keyof typeof Ionicons.glyphMap {
   const map: Record<string, keyof typeof Ionicons.glyphMap> = {
+    new_request: 'mail',
     request_new: 'mail',
     project_approved: 'checkmark-circle',
     project_declined: 'close-circle',
+    project_created: 'folder',
     task_assigned: 'checkbox',
     task_completed: 'checkmark-done',
+    task_overdue: 'alert-circle',
+    invoice_sent: 'document-text',
     invoice_paid: 'card',
     invoice_overdue: 'alert-circle',
+    new_booking: 'calendar',
     booking_new: 'calendar',
+    booking_created: 'calendar',
     booking_confirmed: 'calendar-outline',
     booking_cancelled: 'calendar-clear',
+    system: 'sparkles',
   };
   return map[type] || 'notifications';
+}
+
+interface NotificationItem {
+  id: string;
+  type: string;
+  title: string;
+  message: string | null;
+  link_url: string | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  is_read: boolean;
+  is_archived: boolean;
+  created_at: string;
+  triggered_by_name: string | null;
+}
+
+function getLocalizedTitle(
+  n: NotificationItem,
+  t: (key: string, opts?: any) => string,
+): string {
+  const name = n.triggered_by_name || '';
+
+  switch (n.type) {
+    case 'new_request':
+    case 'request_new':
+      return name
+        ? t('notifications.type_new_request', { name })
+        : t('notifications.type_new_request_no_name');
+
+    case 'invoice_sent': {
+      const m = n.title.match(/Invoice (.+) sent/);
+      return m ? t('notifications.type_invoice_sent', { number: m[1] }) : n.title;
+    }
+
+    case 'invoice_paid':
+      return t('notifications.type_invoice_paid');
+
+    case 'invoice_overdue': {
+      const m = n.title.match(/Invoice (.+) is overdue/);
+      return m ? t('notifications.type_invoice_overdue', { number: m[1] }) : n.title;
+    }
+
+    case 'task_overdue': {
+      const m = n.title.match(/Task overdue: (.+)/);
+      return m ? t('notifications.type_task_overdue', { title: m[1] }) : n.title;
+    }
+
+    case 'project_approved':
+      return t('notifications.type_project_approved');
+
+    case 'project_declined':
+      return t('notifications.type_project_declined');
+
+    case 'new_booking':
+    case 'booking_new':
+    case 'booking_created':
+      if (n.title.toLowerCase().includes('request')) {
+        return name
+          ? t('notifications.type_booking_request', { name })
+          : n.title;
+      }
+      return name
+        ? t('notifications.type_new_booking', { name })
+        : t('notifications.type_new_booking_no_name');
+
+    case 'booking_cancelled':
+      return name
+        ? t('notifications.type_booking_cancelled', { name })
+        : t('notifications.type_booking_cancelled_no_name');
+
+    case 'system':
+      return t('notifications.type_system_ai');
+
+    default:
+      return n.title;
+  }
+}
+
+function getLocalizedMessage(
+  n: NotificationItem,
+  t: (key: string, opts?: any) => string,
+): string | null {
+  if (!n.message) return null;
+  const name = n.triggered_by_name || '';
+
+  switch (n.type) {
+    case 'new_request':
+    case 'request_new': {
+      // "{name} submitted a request for {service}" or "{name} submitted a new project request"
+      const m = n.message.match(/submitted a request for (.+)/);
+      if (m) return t('notifications.msg_request_submitted', { name, service: m[1] });
+      if (n.message.includes('new project request'))
+        return t('notifications.msg_request_submitted_generic', { name });
+      return n.message;
+    }
+
+    case 'invoice_sent': {
+      // "Invoice for ${total} sent to {name}"
+      const m = n.message.match(/Invoice for \$?([\d,.]+) sent to (.+)/);
+      return m ? t('notifications.msg_invoice_sent', { total: m[1], name: m[2] }) : n.message;
+    }
+
+    case 'invoice_paid': {
+      // "{name} paid invoice {number} (${total})"
+      const m = n.message.match(/(.+) paid invoice (.+?) \((.+)\)/);
+      return m ? t('notifications.msg_invoice_paid', { name: m[1], number: m[2], total: m[3] }) : n.message;
+    }
+
+    case 'invoice_overdue': {
+      // "${total} from {name} was due {date}"
+      const m = n.message.match(/(\$?[\d,.]+) from (.+) was due (.+)/);
+      return m ? t('notifications.msg_invoice_overdue', { total: m[1], name: m[2], date: m[3] }) : n.message;
+    }
+
+    case 'task_overdue': {
+      // 'Task in "{project}" was due {date}' or 'Task was due {date}'
+      const mp = n.message.match(/Task in "(.+)" was due (.+)/);
+      if (mp) return t('notifications.msg_task_overdue', { project: mp[1], date: mp[2] });
+      const md = n.message.match(/Task was due (.+)/);
+      if (md) return t('notifications.msg_task_overdue_no_project', { date: md[1] });
+      return n.message;
+    }
+
+    case 'project_approved': {
+      // '{name} approved "{project}"'
+      const m = n.message.match(/(.+) approved "(.+)"/);
+      return m ? t('notifications.msg_project_approved', { name: m[1], project: m[2] }) : n.message;
+    }
+
+    case 'project_declined': {
+      // '{name} declined "{project}": "{reason}"' or '{name} declined "{project}"'
+      const mr = n.message.match(/(.+) declined "(.+?)": "(.+)"/);
+      if (mr) return t('notifications.msg_project_declined_reason', { name: mr[1], project: mr[2], reason: mr[3] });
+      const m = n.message.match(/(.+) declined "(.+)"/);
+      return m ? t('notifications.msg_project_declined', { name: m[1], project: m[2] }) : n.message;
+    }
+
+    case 'new_booking':
+    case 'booking_new':
+    case 'booking_created': {
+      // "{title} on {date}" or "Appointment on {date}"
+      const m = n.message.match(/(.+) on (.+)/);
+      return m ? t('notifications.msg_booking_on', { title: m[1], date: m[2] }) : n.message;
+    }
+
+    case 'booking_cancelled': {
+      // "{service} on {date}"
+      const m = n.message.match(/(.+) on (.+)/);
+      return m ? t('notifications.msg_booking_cancelled', { service: m[1], date: m[2] }) : n.message;
+    }
+
+    case 'system': {
+      // AI messages
+      if (n.message.includes('draft project')) {
+        const m = n.message.match(/from (.+?)(?:'s|'s) request/);
+        return m ? t('notifications.msg_ai_draft_project', { name: m[1] }) : n.message;
+      }
+      if (n.message.includes('follow-up')) {
+        const m = n.message.match(/analyzed (.+?)(?:'s|'s) request/);
+        return m ? t('notifications.msg_ai_followup', { name: m[1] }) : n.message;
+      }
+      if (n.message.includes('analyzed')) {
+        const m = n.message.match(/analyzed (.+?)(?:'s|'s) request/);
+        return m ? t('notifications.msg_ai_analyzed', { name: m[1] }) : n.message;
+      }
+      return n.message;
+    }
+
+    default:
+      return n.message;
+  }
 }
 
 function getRelativeTime(dateStr: string, t: (key: string, opts?: any) => string): string {
@@ -117,6 +295,8 @@ export default function NotificationsScreen() {
 
   const renderNotification = useCallback(({ item }: { item: typeof notifications[0] }) => {
     const iconName = getNotificationIcon(item.type);
+    const localizedTitle = getLocalizedTitle(item as NotificationItem, t);
+    const localizedMessage = getLocalizedMessage(item as NotificationItem, t);
     return (
       <TouchableOpacity
         style={[
@@ -149,11 +329,11 @@ export default function NotificationsScreen() {
             ]}
             numberOfLines={1}
           >
-            {item.title}
+            {localizedTitle}
           </Text>
-          {item.message && (
+          {localizedMessage && (
             <Text style={[styles.notificationMessage, { color: colors.textSecondary }]} numberOfLines={2}>
-              {item.message}
+              {localizedMessage}
             </Text>
           )}
           <Text style={[styles.notificationTime, { color: colors.textTertiary }]}>

@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
+import { secureLog } from '@/lib/security';
 
 interface Notification {
   id: string;
@@ -36,9 +37,15 @@ export function useNotifications() {
         query = query.eq('is_read', false);
       }
 
-      const { data } = await query;
-      setNotifications((data as unknown as Notification[]) || []);
-    } catch {} finally {
+      const { data, error } = await query;
+      if (error) {
+        secureLog.error('Failed to fetch notifications:', error.message);
+      } else {
+        setNotifications((data as unknown as Notification[]) || []);
+      }
+    } catch (err) {
+      secureLog.error('Fetch notifications error:', err);
+    } finally {
       setLoading(false);
     }
   }, [user]);
@@ -46,60 +53,113 @@ export function useNotifications() {
   const fetchUnreadCount = useCallback(async () => {
     if (!user) return;
     try {
-      const { data } = await supabase.rpc('get_unread_notification_count');
-      setUnreadCount(data || 0);
-    } catch {}
+      // Use direct count query — more reliable than RPC
+      const { count, error } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('is_read', false)
+        .eq('is_archived', false);
+
+      if (error) {
+        secureLog.error('Failed to fetch unread count:', error.message);
+        return;
+      }
+      setUnreadCount(count || 0);
+    } catch (err) {
+      secureLog.error('Unread count error:', err);
+    }
   }, [user]);
 
   const markAsRead = useCallback(async (notificationId: string) => {
     try {
-      await (supabase.rpc as any)('mark_notification_read', {
-        p_notification_id: notificationId,
-      });
+      const { error } = await supabase
+        .from('notifications')
+        .update({ is_read: true } as any)
+        .eq('id', notificationId);
+
+      if (error) {
+        secureLog.error('Failed to mark notification as read:', error.message);
+        return;
+      }
       setNotifications((prev) =>
         prev.map((n) => (n.id === notificationId ? { ...n, is_read: true } : n))
       );
       setUnreadCount((prev) => Math.max(0, prev - 1));
-    } catch {}
+    } catch (err) {
+      secureLog.error('Mark as read error:', err);
+    }
   }, []);
 
   const markAllAsRead = useCallback(async () => {
     try {
-      await supabase.rpc('mark_all_notifications_read');
+      const { error } = await supabase
+        .from('notifications')
+        .update({ is_read: true } as any)
+        .eq('is_read', false)
+        .eq('is_archived', false);
+
+      if (error) {
+        secureLog.error('Failed to mark all as read:', error.message);
+        return;
+      }
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
       setUnreadCount(0);
-    } catch {}
+    } catch (err) {
+      secureLog.error('Mark all as read error:', err);
+    }
   }, []);
 
   const archiveNotification = useCallback(async (notificationId: string) => {
     try {
-      await (supabase.rpc as any)('archive_notification', {
-        p_notification_id: notificationId,
-      });
+      const { error } = await supabase
+        .from('notifications')
+        .update({ is_archived: true } as any)
+        .eq('id', notificationId);
+
+      if (error) {
+        secureLog.error('Failed to archive notification:', error.message);
+        return;
+      }
       setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
-    } catch {}
+    } catch (err) {
+      secureLog.error('Archive notification error:', err);
+    }
   }, []);
 
   const archiveAllRead = useCallback(async () => {
     try {
-      await supabase
+      const { error } = await supabase
         .from('notifications')
         .update({ is_archived: true } as any)
         .eq('is_archived', false)
         .eq('is_read', true);
+
+      if (error) {
+        secureLog.error('Failed to archive read notifications:', error.message);
+        return;
+      }
       setNotifications((prev) => prev.filter((n) => !n.is_read));
-    } catch {}
+    } catch (err) {
+      secureLog.error('Archive all read error:', err);
+    }
   }, []);
 
   const archiveAll = useCallback(async () => {
     try {
-      await supabase
+      const { error } = await supabase
         .from('notifications')
         .update({ is_archived: true } as any)
         .eq('is_archived', false);
+
+      if (error) {
+        secureLog.error('Failed to archive all notifications:', error.message);
+        return;
+      }
       setNotifications([]);
       setUnreadCount(0);
-    } catch {}
+    } catch (err) {
+      secureLog.error('Archive all error:', err);
+    }
   }, []);
 
   // Set up real-time subscription

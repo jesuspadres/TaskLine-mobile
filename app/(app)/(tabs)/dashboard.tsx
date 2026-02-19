@@ -254,6 +254,19 @@ export default function DashboardScreen() {
     });
   }, [dateLocale]);
 
+  const formatTimeAgo = useCallback((dateString: string) => {
+    const now = new Date();
+    const date = new Date(dateString);
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return t('notifications.justNow');
+    if (diffMins < 60) return t('notifications.minutesAgo', { count: diffMins });
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return t('notifications.hoursAgo', { count: diffHours });
+    const diffDays = Math.floor(diffHours / 24);
+    return t('notifications.daysAgo', { count: diffDays });
+  }, [t]);
+
   const priorityColors = useMemo(
     () => ({
       low: colors.priorityLow,
@@ -639,29 +652,45 @@ export default function DashboardScreen() {
                 <Text style={[styles.seeAllText, { color: colors.primary }]}>{t('common.seeAll')}</Text>
               </TouchableOpacity>
             </View>
-            {newRequests.map((request, idx) => (
-              <TouchableOpacity
-                key={request.id}
-                style={[
-                  styles.listItem,
-                  idx < newRequests.length - 1 && { borderBottomColor: colors.borderLight, borderBottomWidth: 1 },
-                ]}
-                onPress={() => router.push({ pathname: '/(app)/request-detail', params: { id: request.id } } as any)}
-              >
-                <View style={[styles.listItemIcon, { backgroundColor: colors.statusNew + '15' }]}>
-                  <Ionicons name="mail-unread" size={18} color={colors.statusNew} />
-                </View>
-                <View style={styles.listItemContent}>
-                  <Text style={[styles.listItemTitle, { color: colors.text }]} numberOfLines={1}>
-                    {request.title}
-                  </Text>
-                  <Text style={[styles.listItemSubtitle, { color: colors.textSecondary }]}>
-                    {(request.client as any)?.name || (request as any).client_name || t('dashboard.noClient')}
-                  </Text>
-                </View>
-                <StatusBadge status={request.status} />
-              </TouchableOpacity>
-            ))}
+            {newRequests.map((request, idx) => {
+              const clientName = (request.client as any)?.name || (request as any).client_name || t('dashboard.noClient');
+              const budget = (request as any).budget || (request as any).budget_range;
+              const description = (request as any).description || (request as any).project_description;
+              const timeAgo = request.created_at ? formatTimeAgo(request.created_at) : '';
+              return (
+                <TouchableOpacity
+                  key={request.id}
+                  style={[
+                    styles.listItem,
+                    idx < newRequests.length - 1 && { borderBottomColor: colors.borderLight, borderBottomWidth: 1 },
+                  ]}
+                  onPress={() => router.push({ pathname: '/(app)/request-detail', params: { id: request.id } } as any)}
+                >
+                  <View style={[styles.listItemIcon, { backgroundColor: colors.statusNew + '15' }]}>
+                    <Ionicons name="mail-unread" size={18} color={colors.statusNew} />
+                  </View>
+                  <View style={[styles.listItemContent, { marginRight: Spacing.sm }]}>
+                    <View style={styles.requestTitleRow}>
+                      <Text style={[styles.listItemTitle, { color: colors.text, flex: 1 }]} numberOfLines={1}>
+                        {request.title}
+                      </Text>
+                      {timeAgo ? (
+                        <Text style={[styles.requestTimeAgo, { color: colors.textTertiary }]}>{timeAgo}</Text>
+                      ) : null}
+                    </View>
+                    <Text style={[styles.listItemSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
+                      {clientName}{budget ? `  ·  ${budget}` : ''}
+                    </Text>
+                    {description ? (
+                      <Text style={[styles.requestDescription, { color: colors.textTertiary }]} numberOfLines={1}>
+                        {description}
+                      </Text>
+                    ) : null}
+                  </View>
+                  <StatusBadge status={request.status} />
+                </TouchableOpacity>
+              );
+            })}
           </View>
         )}
 
@@ -959,7 +988,7 @@ const styles = StyleSheet.create({
   listItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
   listItemIcon: {
     width: 36,
@@ -979,6 +1008,19 @@ const styles = StyleSheet.create({
   },
   listItemSubtitle: {
     fontSize: FontSizes.sm,
+  },
+  requestTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  requestTimeAgo: {
+    fontSize: FontSizes.xs,
+    flexShrink: 0,
+  },
+  requestDescription: {
+    fontSize: FontSizes.xs,
+    marginTop: 2,
   },
   priorityDot: {
     width: 10,

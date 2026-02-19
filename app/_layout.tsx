@@ -7,6 +7,7 @@ import { useThemeStore } from '@/stores/themeStore';
 import { useSubscriptionStore } from '@/stores/subscriptionStore';
 import { useTheme } from '@/hooks/useTheme';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
+import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { ToastProvider } from '@/components/Toast';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { OfflineBanner } from '@/components/OfflineBanner';
@@ -22,6 +23,9 @@ export default function RootLayout() {
 
   // Initialize network monitoring
   useNetworkStatus();
+
+  // Initialize push notifications (registers token when user is logged in)
+  usePushNotifications();
 
   useEffect(() => {
     initialize();

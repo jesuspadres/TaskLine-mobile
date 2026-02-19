@@ -27,8 +27,7 @@ import { useNavigationBadges } from '@/hooks/useNavigationBadges';
 import { useSubscription } from '@/hooks/useSubscription';
 import { ENV } from '@/lib/env';
 import { getPlan } from '@/lib/plans';
-import { showToast } from '@/components';
-import { ConfirmDialog } from '@/components';
+import { showToast, ConfirmDialog, DatePicker } from '@/components';
 import { createFoundingLockInSession, deleteAccount } from '@/lib/websiteApi';
 import { secureLog } from '@/lib/security';
 
@@ -46,10 +45,10 @@ interface SettingItem {
 
 type ThemeMode = 'light' | 'dark' | 'system';
 
-const themeModeOptions: { key: ThemeMode; label: string; icon: string }[] = [
-  { key: 'light', label: 'Light', icon: 'sunny-outline' },
-  { key: 'dark', label: 'Dark', icon: 'moon-outline' },
-  { key: 'system', label: 'System', icon: 'phone-portrait-outline' },
+const themeModeOptions: { key: ThemeMode; labelKey: string; icon: string }[] = [
+  { key: 'light', labelKey: 'settings.light', icon: 'sunny-outline' },
+  { key: 'dark', labelKey: 'settings.dark', icon: 'moon-outline' },
+  { key: 'system', labelKey: 'settings.system', icon: 'phone-portrait-outline' },
 ];
 
 type LocaleOption = { key: string; label: string; flag: string };
@@ -77,6 +76,7 @@ export default function SettingsScreen() {
   const [profileName, setProfileName] = useState(
     user?.user_metadata?.name || ''
   );
+  const [profileDob, setProfileDob] = useState<Date | null>(null);
 
   // Change email modal state
   const [showEmailModal, setShowEmailModal] = useState(false);
@@ -227,12 +227,12 @@ export default function SettingsScreen() {
 
   const handleLogout = async () => {
     Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
+      t('settings.signOut'),
+      t('settings.signOutConfirm'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Sign Out',
+          text: t('settings.signOut'),
           style: 'destructive',
           onPress: async () => {
             setLoading(true);
@@ -244,8 +244,19 @@ export default function SettingsScreen() {
     );
   };
 
-  const openProfileModal = () => {
+  const openProfileModal = async () => {
     setProfileName(user?.user_metadata?.name || '');
+    if (user?.id) {
+      try {
+        const { data } = await (supabase.from('profiles') as any)
+          .select('date_of_birth')
+          .eq('id', user.id)
+          .single();
+        setProfileDob(data?.date_of_birth ? new Date(data.date_of_birth + 'T00:00:00') : null);
+      } catch {
+        setProfileDob(null);
+      }
+    }
     setShowProfileModal(true);
   };
 
@@ -259,6 +270,15 @@ export default function SettingsScreen() {
       });
 
       if (error) throw error;
+
+      // Save DOB to profiles table
+      if (user?.id) {
+        await (supabase.from('profiles') as any).upsert({
+          id: user.id,
+          date_of_birth: profileDob ? profileDob.toISOString().split('T')[0] : null,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'id' });
+      }
 
       await refreshUser();
       setShowProfileModal(false);
@@ -274,7 +294,7 @@ export default function SettingsScreen() {
     const requestLink = `${ENV.APP_URL}/request/${user?.id || ''}`;
     try {
       await Share.share({
-        message: `Submit a request: ${requestLink}`,
+        message: `${t('settings.submitRequest')}: ${requestLink}`,
         url: requestLink,
       });
     } catch {
@@ -367,9 +387,9 @@ export default function SettingsScreen() {
         />
       </View>
       <View style={styles.itemContent}>
-        <Text style={[styles.itemTitle, { color: colors.text }]}>Appearance</Text>
+        <Text style={[styles.itemTitle, { color: colors.text }]}>{t('settings.appearance')}</Text>
         <Text style={[styles.itemSubtitle, { color: colors.textSecondary }]}>
-          {mode === 'system' ? 'System default' : mode === 'dark' ? 'Dark mode' : 'Light mode'}
+          {mode === 'system' ? t('settings.systemDefault') : mode === 'dark' ? t('settings.darkMode') : t('settings.lightMode')}
         </Text>
       </View>
     </View>
@@ -402,7 +422,7 @@ export default function SettingsScreen() {
                 { color: isActive ? '#fff' : colors.textSecondary },
               ]}
             >
-              {option.label}
+              {t(option.labelKey)}
             </Text>
           </TouchableOpacity>
         );
@@ -422,7 +442,7 @@ export default function SettingsScreen() {
         />
       </View>
       <View style={styles.itemContent}>
-        <Text style={[styles.itemTitle, { color: colors.text }]}>Language</Text>
+        <Text style={[styles.itemTitle, { color: colors.text }]}>{t('settings.language')}</Text>
         <Text style={[styles.itemSubtitle, { color: colors.textSecondary }]}>
           {locale === 'es' ? 'Español' : 'English'}
         </Text>
@@ -504,7 +524,7 @@ export default function SettingsScreen() {
           id: 'notifications',
           icon: 'notifications-outline',
           title: t('notifications.title'),
-          subtitle: counts.notifications > 0 ? `${counts.notifications} unread` : t('more.noUnread'),
+          subtitle: counts.notifications > 0 ? t('settings.unreadCount', { count: counts.notifications }) : t('more.noUnread'),
           type: 'link',
           onPress: () => router.push('/(app)/notifications' as any),
         },
@@ -662,12 +682,12 @@ export default function SettingsScreen() {
           id: 'about',
           icon: 'information-circle-outline',
           title: t('settings.about'),
-          subtitle: 'Version 1.0.0',
+          subtitle: t('settings.version', { version: '1.0.0' }),
           type: 'link',
           onPress: () => Alert.alert(
             'TaskLine Mobile',
-            'Version 1.0.0\n\n\u00A9 2026 Solvr Labs. All rights reserved.',
-            [{ text: 'OK' }]
+            `${t('settings.version', { version: '1.0.0' })}\n\n© 2026 Solvr Labs. All rights reserved.`,
+            [{ text: t('common.ok') }]
           ),
         },
       ],
@@ -758,7 +778,7 @@ export default function SettingsScreen() {
     );
   };
 
-  const userName = user?.user_metadata?.name || user?.email?.split('@')[0] || 'User';
+  const userName = user?.user_metadata?.name || user?.email?.split('@')[0] || t('settings.defaultUser');
 
   // Remove push/email notification toggles from Preferences section
   // since we now have a dedicated notification settings screen
@@ -771,7 +791,7 @@ export default function SettingsScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={[styles.title, { color: colors.text }]}>Settings</Text>
+          <Text style={[styles.title, { color: colors.text }]}>{t('settings.title')}</Text>
         </View>
 
         {/* Profile Card */}
@@ -1069,7 +1089,7 @@ export default function SettingsScreen() {
               >
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Edit Profile</Text>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>{t('settings.editProfile')}</Text>
               <View style={styles.modalHeaderSpacer} />
             </View>
 
@@ -1090,7 +1110,7 @@ export default function SettingsScreen() {
 
               {/* Full Name */}
               <View style={styles.inputGroup}>
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Full Name</Text>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>{t('settings.fullName')}</Text>
                 <View style={[styles.inputWrapper, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                   <Ionicons
                     name="person-outline"
@@ -1102,7 +1122,7 @@ export default function SettingsScreen() {
                     style={[styles.input, { color: colors.text }]}
                     value={profileName}
                     onChangeText={setProfileName}
-                    placeholder="Enter your full name"
+                    placeholder={t('settings.fullNamePlaceholder')}
                     placeholderTextColor={colors.textTertiary}
                     autoCapitalize="words"
                     returnKeyType="next"
@@ -1110,9 +1130,18 @@ export default function SettingsScreen() {
                 </View>
               </View>
 
+              {/* Date of Birth */}
+              <DatePicker
+                label={t('settings.dateOfBirth')}
+                value={profileDob}
+                onChange={setProfileDob}
+                placeholder={t('auth.dateOfBirthPlaceholder')}
+                maxDate={new Date()}
+              />
+
               {/* Email (read-only display) */}
               <View style={styles.inputGroup}>
-                <Text style={[styles.inputLabel, { color: colors.text }]}>Email</Text>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>{t('settings.emailLabel')}</Text>
                 <View style={[styles.inputWrapper, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
                   <Ionicons
                     name="mail-outline"
@@ -1125,7 +1154,7 @@ export default function SettingsScreen() {
                   </Text>
                 </View>
                 <Text style={[styles.inputHint, { color: colors.textTertiary }]}>
-                  Use "Change Email" in Account settings to update your email.
+                  {t('settings.emailChangeHint')}
                 </Text>
               </View>
 
@@ -1142,7 +1171,7 @@ export default function SettingsScreen() {
                 {profileSaving ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={styles.saveButtonText}>Save Changes</Text>
+                  <Text style={styles.saveButtonText}>{t('settings.saveChanges')}</Text>
                 )}
               </TouchableOpacity>
             </ScrollView>

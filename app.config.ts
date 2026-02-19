@@ -71,6 +71,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-secure-store',
     'expo-localization',
     'expo-web-browser',
+    [
+      'expo-notifications',
+      {
+        icon: './assets/icon.png',
+        color: '#2563eb',
+      },
+    ],
   ],
   extra: {
     router: {

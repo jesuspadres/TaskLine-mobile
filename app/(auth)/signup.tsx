@@ -22,13 +22,13 @@ import { createCheckoutSession, syncSubscription } from '@/lib/websiteApi';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
-import { showToast } from '@/components';
+import { showToast, DatePicker } from '@/components';
 import { useHaptics } from '@/hooks/useHaptics';
 import { ImpactFeedbackStyle, NotificationFeedbackType } from 'expo-haptics';
 import { secureLog } from '@/lib/security';
 import type { User, Session } from '@supabase/supabase-js';
 
-const TOTAL_STEPS = 6; // 0-5
+const TOTAL_STEPS = 7; // 0-6
 
 // Password validation
 function validatePassword(password: string) {
@@ -55,6 +55,7 @@ export default function SignupScreen() {
   const [businessName, setBusinessName] = useState('');
   const [businessType, setBusinessType] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState<Date | null>(null);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
@@ -164,6 +165,7 @@ export default function SignupScreen() {
           id: userId,
           full_name: name.trim() || null,
           email: email.trim(),
+          date_of_birth: dateOfBirth ? dateOfBirth.toISOString().split('T')[0] : null,
           business_name: businessName.trim() || null,
           business_type: businessType || null,
           phone_number: phoneNumber.trim() || null,
@@ -237,7 +239,7 @@ export default function SignupScreen() {
       // Don't redirect — user stays on plans screen until they explicitly continue
       setCheckoutComplete(true);
     } catch (err: any) {
-      showToast('error', err.message || 'Checkout failed');
+      showToast('error', err.message || t('auth.checkoutFailed'));
     } finally {
       setCheckoutLoading(false);
     }
@@ -252,9 +254,7 @@ export default function SignupScreen() {
       <TouchableOpacity onPress={goBack} style={styles.backBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
         <Ionicons name="arrow-back" size={24} color={colors.text} />
       </TouchableOpacity>
-      <Text style={[styles.stepIndicator, { color: colors.textTertiary }]}>
-        {t('auth.stepOf', { current: step + 1, total: TOTAL_STEPS })}
-      </Text>
+      <View style={{ width: 40 }} />
       {showSkip ? (
         <TouchableOpacity onPress={goNext} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           <Text style={[styles.skipText, { color: colors.primary }]}>{t('auth.skip')}</Text>
@@ -265,17 +265,11 @@ export default function SignupScreen() {
     </View>
   );
 
-  const renderProgressBar = () => (
-    <View style={[styles.progressContainer, { backgroundColor: colors.border }]}>
-      <View style={[styles.progressFill, { width: `${((step + 1) / TOTAL_STEPS) * 100}%`, backgroundColor: colors.primary }]} />
-    </View>
-  );
-
   // Step 0: Name (centered)
   const renderNameStep = () => (
     <View style={styles.stepContent}>
       {renderStepHeader(t('auth.whatsYourName'))}
-      {renderProgressBar()}
+
       <View style={[styles.stepBody, styles.centeredBody]}>
         <Image source={require('@/assets/icon.png')} style={styles.stepLogo} />
 
@@ -303,11 +297,37 @@ export default function SignupScreen() {
     </View>
   );
 
-  // Step 1: Email (centered, with availability check)
+  // Step 1: Date of Birth (centered)
+  const renderDobStep = () => (
+    <View style={styles.stepContent}>
+      {renderStepHeader(t('auth.dateOfBirth'))}
+
+      <View style={[styles.stepBody, styles.centeredBody]}>
+        <Text style={[styles.stepTitle, styles.centeredTitle, { color: colors.text }]}>{t('auth.dateOfBirth')}</Text>
+        <View style={{ width: '100%', maxWidth: 340 }}>
+          <DatePicker
+            value={dateOfBirth}
+            onChange={setDateOfBirth}
+            placeholder={t('auth.dateOfBirthPlaceholder')}
+            maxDate={new Date()}
+          />
+        </View>
+      </View>
+      <TouchableOpacity
+        style={[styles.continueBtn, { backgroundColor: colors.primary }, !dateOfBirth && styles.btnDisabled]}
+        onPress={goNext}
+        disabled={!dateOfBirth}
+      >
+        <Text style={styles.continueBtnText}>{t('auth.continue')}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  // Step 2: Email (centered, with availability check)
   const renderEmailStep = () => (
     <View style={styles.stepContent}>
       {renderStepHeader(t('auth.whatsYourEmail'))}
-      {renderProgressBar()}
+
       <View style={[styles.stepBody, styles.centeredBody]}>
         <Text style={[styles.stepTitle, styles.centeredTitle, { color: colors.text }]}>{t('auth.whatsYourEmail')}</Text>
         <TextInput
@@ -355,7 +375,7 @@ export default function SignupScreen() {
   const renderPasswordStep = () => (
     <View style={styles.stepContent}>
       {renderStepHeader(t('auth.createPassword'))}
-      {renderProgressBar()}
+
       <View style={styles.stepBody}>
         <Text style={[styles.stepTitle, styles.centeredTitle, { color: colors.text }]}>{t('auth.createPassword')}</Text>
 
@@ -445,7 +465,7 @@ export default function SignupScreen() {
   const renderBusinessStep = () => (
     <View style={styles.stepContent}>
       {renderStepHeader(t('auth.tellUsAboutBusiness'), true)}
-      {renderProgressBar()}
+
       <View style={styles.stepBody}>
         <Text style={[styles.stepTitle, styles.centeredTitle, { color: colors.text }]}>{t('auth.tellUsAboutBusiness')}</Text>
         <Text style={[styles.stepSubtitle, styles.centeredTitle, { color: colors.textTertiary }]}>{t('auth.businessInfoOptional')}</Text>
@@ -503,7 +523,7 @@ export default function SignupScreen() {
   const renderTermsStep = () => (
     <View style={styles.stepContent}>
       {renderStepHeader(t('auth.almostDone'))}
-      {renderProgressBar()}
+
       <View style={[styles.stepBody, styles.centeredBody]}>
         <Text style={[styles.stepTitle, styles.centeredTitle, { color: colors.text }]}>{t('auth.almostDone')}</Text>
 
@@ -516,6 +536,14 @@ export default function SignupScreen() {
             <Ionicons name="mail-outline" size={18} color={colors.textSecondary} />
             <Text style={[styles.summaryText, { color: colors.text }]}>{email}</Text>
           </View>
+          {dateOfBirth && (
+            <View style={styles.summaryRow}>
+              <Ionicons name="calendar-outline" size={18} color={colors.textSecondary} />
+              <Text style={[styles.summaryText, { color: colors.text }]}>
+                {dateOfBirth.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+              </Text>
+            </View>
+          )}
           {businessName ? (
             <View style={styles.summaryRow}>
               <Ionicons name="briefcase-outline" size={18} color={colors.textSecondary} />
@@ -608,12 +636,10 @@ export default function SignupScreen() {
     <View style={styles.stepContent}>
       <View style={styles.stepHeader}>
         <View style={{ width: 40 }} />
-        <Text style={[styles.stepIndicator, { color: colors.textTertiary }]}>
-          {t('auth.stepOf', { current: step + 1, total: TOTAL_STEPS })}
-        </Text>
+        <View style={{ width: 40 }} />
         <View style={{ width: 40 }} />
       </View>
-      {renderProgressBar()}
+
       <View style={styles.stepBody}>
         <Text style={[styles.stepTitle, styles.centeredTitle, { color: colors.text }]}>{t('auth.choosePlan')}</Text>
 
@@ -817,7 +843,7 @@ export default function SignupScreen() {
   // RENDER
   // ──────────────────────────────────────────────
 
-  const steps = [renderNameStep, renderEmailStep, renderPasswordStep, renderBusinessStep, renderTermsStep, renderPlansStep];
+  const steps = [renderNameStep, renderDobStep, renderEmailStep, renderPasswordStep, renderBusinessStep, renderTermsStep, renderPlansStep];
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -853,10 +879,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   backBtn: { width: 40 },
-  stepIndicator: { fontSize: FontSizes.xs, fontWeight: '500' },
   skipText: { fontSize: FontSizes.sm, fontWeight: '600' },
-  progressContainer: { height: 3, borderRadius: 2, marginBottom: Spacing['2xl'] },
-  progressFill: { height: 3, borderRadius: 2 },
   stepBody: { flex: 1, marginBottom: Spacing.xl },
   centeredBody: { justifyContent: 'center', alignItems: 'center' },
   stepLogo: { width: 56, height: 56, borderRadius: BorderRadius.lg, marginBottom: Spacing.xl },

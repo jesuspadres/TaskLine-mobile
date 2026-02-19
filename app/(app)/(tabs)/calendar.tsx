@@ -39,7 +39,9 @@ export default function CalendarScreen() {
   const { t, locale } = useTranslations();
   const router = useRouter();
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string | null>(
+    new Date().toISOString().split('T')[0]
+  );
   const [viewMode, setViewMode] = useState<ViewMode>('month');
 
   const dateLocale = locale === 'es' ? 'es-MX' : 'en-US';

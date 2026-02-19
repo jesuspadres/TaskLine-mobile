@@ -33,8 +33,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const { session } = await getSession();
 
       if (session) {
-        const { user } = await getUser();
-        set({ user, session, loading: false, initialized: true });
+        try {
+          const { user } = await getUser();
+          set({ user, session, loading: false, initialized: true });
+        } catch (refreshError: any) {
+          // Refresh token expired or revoked — clear session and send to login
+          if (refreshError?.message?.includes('Refresh Token') || refreshError?.status === 401) {
+            await signOut();
+          }
+          set({ user: null, session: null, loading: false, initialized: true });
+        }
       } else {
         set({ user: null, session: null, loading: false, initialized: true });
       }

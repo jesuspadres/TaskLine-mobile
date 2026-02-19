@@ -40,6 +40,17 @@ async function persistLocale(locale: string): Promise<void> {
 }
 
 /**
+ * Global listener set so all useTranslations() consumers re-render
+ * when any one of them changes the locale.
+ */
+type LocaleListener = (locale: string) => void;
+const localeListeners = new Set<LocaleListener>();
+
+function notifyLocaleChange(newLocale: string) {
+  localeListeners.forEach((listener) => listener(newLocale));
+}
+
+/**
  * Convenience hook for translations.
  *
  * @returns `t` - translate a key, `locale` - current locale, `setLocale` - change and persist locale
@@ -61,10 +72,22 @@ export function useTranslations() {
       if (!cancelled && saved && saved !== i18n.locale) {
         i18n.locale = saved;
         setLocaleState(saved);
+        notifyLocaleChange(saved);
       }
     });
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  // Subscribe to locale changes from other components
+  useEffect(() => {
+    const listener: LocaleListener = (newLocale) => {
+      setLocaleState(newLocale);
+    };
+    localeListeners.add(listener);
+    return () => {
+      localeListeners.delete(listener);
     };
   }, []);
 
@@ -79,6 +102,7 @@ export function useTranslations() {
   const setLocale = useCallback(async (newLocale: string) => {
     i18n.locale = newLocale;
     setLocaleState(newLocale);
+    notifyLocaleChange(newLocale);
     await persistLocale(newLocale);
   }, []);
 

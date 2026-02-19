@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
+  Platform,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
@@ -34,6 +36,7 @@ import {
   syncSubscription,
 } from '@/lib/websiteApi';
 import { secureLog } from '@/lib/security';
+import { ENV } from '@/lib/env';
 
 export default function PlansScreen() {
   const { colors } = useTheme();
@@ -47,7 +50,13 @@ export default function PlansScreen() {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
 
+  const isIOS = Platform.OS === 'ios';
   const currentTierIndex = TIER_ORDER.indexOf(subscription.tier);
+
+  /** On iOS, direct users to the website for subscription purchases */
+  const handleSubscribeOnWeb = useCallback(() => {
+    Linking.openURL(`${ENV.APP_URL}/pricing`);
+  }, []);
 
   /** Resolve feature string values that may be i18n keys */
   const resolveFeatureValue = useCallback(
@@ -281,7 +290,7 @@ export default function PlansScreen() {
 
             <TouchableOpacity
               style={[styles.lockInButton, { backgroundColor: colors.primary }]}
-              onPress={handleLockInDiscount}
+              onPress={isIOS ? handleSubscribeOnWeb : handleLockInDiscount}
               disabled={checkoutLoading}
             >
               {checkoutLoading ? (
@@ -289,12 +298,14 @@ export default function PlansScreen() {
               ) : (
                 <>
                   <Ionicons
-                    name="lock-closed"
+                    name={isIOS ? 'globe-outline' : 'lock-closed'}
                     size={16}
                     color="#fff"
                     style={{ marginRight: Spacing.xs }}
                   />
-                  <Text style={styles.lockInButtonText}>{t('plans.lockInDiscount')}</Text>
+                  <Text style={styles.lockInButtonText}>
+                    {isIOS ? t('plans.visitWebsite') : t('plans.lockInDiscount')}
+                  </Text>
                 </>
               )}
             </TouchableOpacity>
@@ -358,11 +369,33 @@ export default function PlansScreen() {
             </Text>
             <View style={[styles.saveBadge, { backgroundColor: colors.success }]}>
               <Text style={styles.saveBadgeText}>
-                {t('plans.savePercent', { percent: '20' })}
+                {t('plans.savePercent', { percent: '34' })}
               </Text>
             </View>
           </TouchableOpacity>
         </View>
+
+        {/* iOS: Web subscription notice */}
+        {isIOS && (
+          <View
+            style={[
+              styles.iosWebNotice,
+              { backgroundColor: colors.primaryLight, borderColor: colors.primary },
+            ]}
+          >
+            <Ionicons name="information-circle" size={20} color={colors.primary} />
+            <View style={styles.iosWebNoticeContent}>
+              <Text style={[styles.iosWebNoticeText, { color: colors.text }]}>
+                {t('plans.iosSubscriptionNote')}
+              </Text>
+              <TouchableOpacity onPress={handleSubscribeOnWeb}>
+                <Text style={[styles.iosWebNoticeLink, { color: colors.primary }]}>
+                  {t('plans.visitWebsite')}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {/* Plan Cards */}
         {PLANS.map((plan) => {
@@ -497,6 +530,27 @@ export default function PlansScreen() {
                       {t('plans.cancelSubscription')}
                     </Text>
                   </TouchableOpacity>
+                )
+              ) : isIOS ? (
+                /* iOS: No in-app purchases — direct to website */
+                isUpgrade ? (
+                  <TouchableOpacity
+                    style={[styles.actionButton, { backgroundColor: colors.primary }]}
+                    onPress={handleSubscribeOnWeb}
+                  >
+                    <View style={styles.webButtonRow}>
+                      <Ionicons name="globe-outline" size={16} color="#fff" />
+                      <Text style={[styles.actionButtonText, { color: '#fff' }]}>
+                        {t('plans.subscribeOnWeb')}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ) : (
+                  <View style={[styles.actionButton, { backgroundColor: colors.surfaceSecondary }]}>
+                    <Text style={[styles.actionButtonText, { color: colors.textTertiary }]}>
+                      {t('plans.downgrade')}
+                    </Text>
+                  </View>
                 )
               ) : (
                 <TouchableOpacity
@@ -873,6 +927,33 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 10,
     fontWeight: '700',
+  },
+  // iOS web notice
+  iosWebNotice: {
+    flexDirection: 'row',
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    padding: Spacing.md,
+    gap: Spacing.sm,
+    marginBottom: Spacing.lg,
+    alignItems: 'flex-start',
+  },
+  iosWebNoticeContent: {
+    flex: 1,
+  },
+  iosWebNoticeText: {
+    fontSize: FontSizes.sm,
+    lineHeight: 20,
+  },
+  iosWebNoticeLink: {
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
+    marginTop: Spacing.xs,
+  },
+  webButtonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
   },
   // Plan cards
   planCard: {
