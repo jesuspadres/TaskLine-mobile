@@ -19,8 +19,6 @@ import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
 import { showToast } from '@/components';
-import Constants, { ExecutionEnvironment } from 'expo-constants';
-import * as Device from 'expo-device';
 import {
   registerForPushNotifications,
   savePushToken,
@@ -89,8 +87,6 @@ export default function NotificationSettingsScreen() {
   const savingRef = useRef(false);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushChecking, setPushChecking] = useState(true);
-  const [debugInfo, setDebugInfo] = useState<string[]>([]);
-  const [debugTesting, setDebugTesting] = useState(false);
 
   // Check push notification permission status
   useEffect(() => {
@@ -104,58 +100,6 @@ export default function NotificationSettingsScreen() {
     };
     checkPushStatus();
   }, []);
-
-  const runPushDiagnostic = async () => {
-    setDebugTesting(true);
-    const info: string[] = [];
-
-    info.push(`Platform: ${Platform.OS}`);
-    info.push(`Is Device: ${Device.isDevice}`);
-    info.push(`Exec Env: ${Constants.executionEnvironment}`);
-    info.push(`Is Expo Go: ${Constants.executionEnvironment === ExecutionEnvironment.StoreClient}`);
-    info.push(`Push Supported: ${isPushSupported()}`);
-
-    const projectId = Constants.expoConfig?.extra?.eas?.projectId;
-    info.push(`Project ID: ${projectId || 'MISSING'}`);
-
-    try {
-      const permStatus = await getPermissionStatus();
-      info.push(`Permission: ${permStatus}`);
-    } catch (e: any) {
-      info.push(`Permission Error: ${e.message}`);
-    }
-
-    // Try direct expo-notifications call to get detailed error
-    try {
-      info.push('Loading expo-notifications...');
-      setDebugInfo([...info]);
-      const Notifications = require('expo-notifications');
-      info.push(`Module loaded: ${!!Notifications}`);
-
-      info.push('Getting push token...');
-      setDebugInfo([...info]);
-      const tokenData = await Notifications.getExpoPushTokenAsync({
-        projectId: projectId,
-      });
-      const token = tokenData.data;
-      info.push(`Token: ${token}`);
-
-      if (token && user?.id) {
-        try {
-          await savePushToken(user.id, token);
-          info.push('Token saved to DB!');
-        } catch (e: any) {
-          info.push(`Save Error: ${e.message}`);
-        }
-      }
-    } catch (e: any) {
-      info.push(`TOKEN ERROR: ${e.message}`);
-      info.push(`Stack: ${(e.stack || '').substring(0, 200)}`);
-    }
-
-    setDebugInfo(info);
-    setDebugTesting(false);
-  };
 
   const handleTogglePush = async () => {
     if (pushEnabled) {
@@ -403,48 +347,6 @@ export default function NotificationSettingsScreen() {
                 )}
               </View>
             </View>
-          </View>
-        )}
-
-        {/* Push Debug Section */}
-        {Platform.OS !== 'web' && (
-          <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.textTertiary }]}>
-              PUSH DEBUG
-            </Text>
-            <View
-              style={[
-                styles.sectionContent,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-            >
-              <TouchableOpacity
-                style={[styles.settingItem, styles.lastItem, { justifyContent: 'center' }]}
-                onPress={runPushDiagnostic}
-                disabled={debugTesting}
-              >
-                {debugTesting ? (
-                  <ActivityIndicator size="small" color={colors.primary} />
-                ) : (
-                  <Text style={{ color: colors.primary, fontWeight: '600', fontSize: FontSizes.md }}>
-                    Test Push Registration
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-            {debugInfo.length > 0 && (
-              <View style={[styles.sectionContent, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, marginTop: Spacing.sm }]}>
-                {debugInfo.map((line, i) => (
-                  <Text
-                    key={i}
-                    style={{ color: colors.text, fontSize: FontSizes.xs, paddingHorizontal: Spacing.md, paddingVertical: 2, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}
-                    selectable
-                  >
-                    {line}
-                  </Text>
-                ))}
-              </View>
-            )}
           </View>
         )}
 

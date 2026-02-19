@@ -5,7 +5,7 @@ const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY ?? '';
 export default ({ config }: ConfigContext): ExpoConfig => ({
   name: 'TaskLine',
   slug: 'taskline-mobile',
-  version: '1.0.3',
+  version: '1.0.4',
   orientation: 'portrait',
   icon: './assets/icon.png',
   scheme: 'taskline',
@@ -77,6 +77,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       {
         icon: './assets/icon.png',
         color: '#2563eb',
+      },
+    ],
+    [
+      '@sentry/react-native/expo',
+      {
+        organization: process.env.SENTRY_ORG ?? 'solvr-labs',
+        project: process.env.SENTRY_PROJECT ?? 'taskline-mobile',
       },
     ],
   ],

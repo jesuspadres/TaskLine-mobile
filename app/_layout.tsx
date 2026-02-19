@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import * as Sentry from '@sentry/react-native';
 import { useAuthStore } from '@/stores/authStore';
 import { useThemeStore } from '@/stores/themeStore';
 import { useSubscriptionStore } from '@/stores/subscriptionStore';
@@ -11,8 +12,24 @@ import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { ToastProvider } from '@/components/Toast';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { OfflineBanner } from '@/components/OfflineBanner';
+import { ENV } from '@/lib/env';
 
-export default function RootLayout() {
+Sentry.init({
+  dsn: ENV.SENTRY_DSN,
+  enabled: !!ENV.SENTRY_DSN,
+  tracesSampleRate: 1.0,
+  _experiments: {
+    profilesSampleRate: 1.0,
+  },
+  environment: __DEV__ ? 'development' : 'production',
+  beforeSend(event) {
+    // Don't send events in dev mode
+    if (__DEV__) return null;
+    return event;
+  },
+});
+
+function RootLayout() {
   const { user, loading, initialized, initialize } = useAuthStore();
   const initializeTheme = useThemeStore((s) => s.initialize);
   const initializeSubscription = useSubscriptionStore((s) => s.initialize);
@@ -33,11 +50,14 @@ export default function RootLayout() {
   }, []);
 
   // Initialize subscription when user logs in, clear on logout
+  // Set Sentry user context for error attribution
   useEffect(() => {
     if (user) {
       initializeSubscription(user.id);
+      Sentry.setUser({ id: user.id, email: user.email });
     } else if (initialized) {
       clearSubscription();
+      Sentry.setUser(null);
     }
   }, [user]);
 
@@ -76,6 +96,8 @@ export default function RootLayout() {
     </ErrorBoundary>
   );
 }
+
+export default Sentry.wrap(RootLayout);
 
 const styles = StyleSheet.create({
   loadingContainer: {

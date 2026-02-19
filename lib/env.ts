@@ -14,6 +14,10 @@ export const ENV = {
   // Get this from: Google Cloud Console > APIs & Services > Credentials > API Keys
   // Restrict to iOS bundle ID (com.solvrlabs.taskline) and Android package + SHA-1
   GOOGLE_MAPS_API_KEY: 'AIzaSyAW0xDwTQ6sqpqbuBUMuKsJK1a7oEb8Rnw',
+
+  // Sentry DSN
+  // Get this from: Sentry > Settings > Projects > taskline-mobile > Client Keys (DSN)
+  SENTRY_DSN: 'https://e0e4b57ca54d82eab0c5c39cbaf3e457@o4510913376550912.ingest.us.sentry.io/4510913378844672',
 };
 
 // Validate environment
