@@ -31,7 +31,9 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# Service account keys
+# Firebase / service account keys
+google-services.json
+GoogleService-Info.plist
 *.gserviceaccount*.json
 primeval-falcon-*.json
 
