@@ -5,7 +5,7 @@ const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY ?? '';
 export default ({ config }: ConfigContext): ExpoConfig => ({
   name: 'TaskLine',
   slug: 'taskline-mobile',
-  version: '1.0.0',
+  version: '1.0.1',
   orientation: 'portrait',
   icon: './assets/icon.png',
   scheme: 'taskline',
