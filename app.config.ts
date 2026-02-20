@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { ExpoConfig, ConfigContext } from 'expo/config';
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY ?? '';
@@ -5,7 +6,7 @@ const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY ?? '';
 export default ({ config }: ConfigContext): ExpoConfig => ({
   name: 'TaskLine',
   slug: 'taskline-mobile',
-  version: '1.0.5',
+  version: '1.0.0',
   orientation: 'portrait',
   icon: './assets/icon.png',
   scheme: 'taskline',

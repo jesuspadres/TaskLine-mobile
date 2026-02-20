@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -37,6 +37,21 @@ import type { Client, Project } from '@/lib/database.types';
 
 type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled';
 
+type InvoiceCurrency = 'USD' | 'EUR' | 'GBP' | 'CAD' | 'AUD' | 'MXN';
+
+const CURRENCY_OPTIONS: { key: InvoiceCurrency; label: string }[] = [
+  { key: 'USD', label: 'USD ($)' },
+  { key: 'EUR', label: 'EUR (\u20ac)' },
+  { key: 'GBP', label: 'GBP (\u00a3)' },
+  { key: 'CAD', label: 'CAD ($)' },
+  { key: 'AUD', label: 'AUD ($)' },
+  { key: 'MXN', label: 'MXN ($)' },
+];
+
+const FIXED_FEE_BY_CURRENCY: Record<InvoiceCurrency, number> = {
+  USD: 0.30, EUR: 0.25, GBP: 0.20, CAD: 0.30, AUD: 0.30, MXN: 3.00,
+};
+
 interface InvoiceRow {
   id: string;
   user_id: string;
@@ -46,9 +61,12 @@ interface InvoiceRow {
   issue_date: string;
   due_date: string | null;
   status: InvoiceStatus;
+  currency: InvoiceCurrency;
   subtotal: number;
   tax_rate: number;
   tax_amount: number;
+  processing_fee_amount: number;
+  pass_processing_fees: boolean;
   total: number;
   notes: string | null;
   payment_terms: string | null;
@@ -126,6 +144,10 @@ export default function InvoicesScreen() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [invoiceToDelete, setInvoiceToDelete] = useState<InvoiceRow | null>(null);
 
+  // Send prompt after creation
+  const [showSendPrompt, setShowSendPrompt] = useState(false);
+  const createdInvoiceRef = useRef<InvoiceRow | null>(null);
+
   // Form state
   const [formInvoiceNumber, setFormInvoiceNumber] = useState('');
   const [formClientId, setFormClientId] = useState('');
@@ -134,12 +156,24 @@ export default function InvoicesScreen() {
   const [formIssueDate, setFormIssueDate] = useState<Date | null>(new Date());
   const [formDueDate, setFormDueDate] = useState<Date | null>(null);
   const [formPaymentTerms, setFormPaymentTerms] = useState('');
+  const [formCurrency, setFormCurrency] = useState<InvoiceCurrency>('USD');
   const [formTaxRate, setFormTaxRate] = useState('0');
   const [formNotes, setFormNotes] = useState('');
   const [lineItems, setLineItems] = useState<LineItem[]>([
     { id: '1', description: '', quantity: 1, unit_price: 0 },
   ]);
+  const [formPassFees, setFormPassFees] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  // Invoice defaults from user_settings
+  const invoiceDefaults = useRef<{
+    currency: InvoiceCurrency;
+    taxRate: string;
+    paymentTerms: string;
+    notes: string;
+    passProcessingFees: boolean;
+    processingFeePercentage: number;
+  }>({ currency: 'USD', taxRate: '0', paymentTerms: '', notes: '', passProcessingFees: false, processingFeePercentage: 2.90 });
 
   // ─── Theme-dependent configs ────────────────────────────
   const statusConfig = useMemo(() => ({
@@ -262,10 +296,34 @@ export default function InvoicesScreen() {
     }
   }, []);
 
+  const fetchInvoiceDefaults = useCallback(async () => {
+    if (!user) return;
+    try {
+      const { data, error } = await (supabase.from('user_settings') as any)
+        .select('default_tax_rate, default_currency, default_payment_terms, default_invoice_notes, pass_processing_fees, processing_fee_percentage')
+        .eq('user_id', user.id)
+        .single();
+
+      if (error || !data) return;
+
+      invoiceDefaults.current = {
+        currency: data.default_currency || 'USD',
+        taxRate: data.default_tax_rate != null ? String(data.default_tax_rate) : '0',
+        paymentTerms: data.default_payment_terms || '',
+        notes: data.default_invoice_notes || '',
+        passProcessingFees: !!data.pass_processing_fees,
+        processingFeePercentage: data.processing_fee_percentage ?? 2.90,
+      };
+    } catch (error) {
+      secureLog.error('Error fetching invoice defaults:', error);
+    }
+  }, [user]);
+
   useEffect(() => {
     fetchClients();
     fetchProjects();
-  }, [fetchClients, fetchProjects]);
+    fetchInvoiceDefaults();
+  }, [fetchClients, fetchProjects, fetchInvoiceDefaults]);
 
   // ─── Compute display status (auto-detect overdue) ──────
   const getDisplayStatus = useCallback((invoice: InvoiceRow): InvoiceStatus => {
@@ -355,10 +413,10 @@ export default function InvoicesScreen() {
   const activeSortCount = useMemo(() => sortBy !== 'newest' ? 1 : 0, [sortBy]);
 
   // ─── Formatting ────────────────────────────────────────
-  const formatCurrency = useCallback((amount: number, decimals = true) => {
+  const formatCurrency = useCallback((amount: number, currency: InvoiceCurrency = 'USD', decimals = true) => {
     return new Intl.NumberFormat(locale === 'es' ? 'es-MX' : 'en-US', {
       style: 'currency',
-      currency: 'USD',
+      currency,
       minimumFractionDigits: decimals ? 2 : 0,
       maximumFractionDigits: decimals ? 2 : 0,
     }).format(amount);
@@ -411,9 +469,18 @@ export default function InvoicesScreen() {
     return Math.round(calculateSubtotal() * (rate / 100) * 100) / 100;
   }, [calculateSubtotal, formTaxRate]);
 
+  const calculateProcessingFee = useCallback(() => {
+    if (!formPassFees) return 0;
+    const defaults = invoiceDefaults.current;
+    const pct = defaults.processingFeePercentage;
+    const fixed = FIXED_FEE_BY_CURRENCY[formCurrency] ?? 0.30;
+    const base = calculateSubtotal() + calculateTaxAmount();
+    return Math.round(((base * (pct / 100)) + fixed) * 100) / 100;
+  }, [formPassFees, formCurrency, calculateSubtotal, calculateTaxAmount]);
+
   const calculateTotal = useCallback(() => {
-    return calculateSubtotal() + calculateTaxAmount();
-  }, [calculateSubtotal, calculateTaxAmount]);
+    return calculateSubtotal() + calculateTaxAmount() + calculateProcessingFee();
+  }, [calculateSubtotal, calculateTaxAmount, calculateProcessingFee]);
 
   const addLineItem = () => {
     setLineItems(prev => [
@@ -436,15 +503,18 @@ export default function InvoicesScreen() {
 
   // ─── Form helpers ──────────────────────────────────────
   const resetForm = () => {
+    const defaults = invoiceDefaults.current;
     setFormInvoiceNumber('');
     setFormClientId('');
     setFormProjectId('');
     setFormStatus('draft');
     setFormIssueDate(new Date());
     setFormDueDate(null);
-    setFormPaymentTerms('');
-    setFormTaxRate('0');
-    setFormNotes('');
+    setFormPaymentTerms(defaults.paymentTerms);
+    setFormCurrency(defaults.currency);
+    setFormTaxRate(defaults.taxRate);
+    setFormNotes(defaults.notes);
+    setFormPassFees(defaults.passProcessingFees);
     setLineItems([{ id: '1', description: '', quantity: 1, unit_price: 0 }]);
     setFormErrors({});
   };
@@ -463,6 +533,7 @@ export default function InvoicesScreen() {
 
   // ─── CRUD operations ──────────────────────────────────
   const openAddModal = async () => {
+    await fetchInvoiceDefaults();
     resetForm();
     const invoiceNumber = await generateInvoiceNumber();
     setFormInvoiceNumber(invoiceNumber);
@@ -508,7 +579,9 @@ export default function InvoicesScreen() {
     setFormIssueDate(new Date(selectedInvoice.issue_date));
     setFormDueDate(selectedInvoice.due_date ? new Date(selectedInvoice.due_date) : null);
     setFormPaymentTerms(selectedInvoice.payment_terms || '');
+    setFormCurrency(selectedInvoice.currency || 'USD');
     setFormTaxRate(String(selectedInvoice.tax_rate || 0));
+    setFormPassFees(!!selectedInvoice.pass_processing_fees);
     setFormNotes(selectedInvoice.notes || '');
 
     // Load line items from DB
@@ -541,7 +614,8 @@ export default function InvoicesScreen() {
       const subtotal = calculateSubtotal();
       const taxRate = parseFloat(formTaxRate) || 0;
       const taxAmount = calculateTaxAmount();
-      const total = subtotal + taxAmount;
+      const processingFeeAmount = calculateProcessingFee();
+      const total = subtotal + taxAmount + processingFeeAmount;
 
       const { data: invoiceData, error: invoiceError } = await supabase
         .from('invoices')
@@ -550,6 +624,7 @@ export default function InvoicesScreen() {
           client_id: formClientId,
           project_id: formProjectId || null,
           status: formStatus as InvoiceStatus,
+          currency: formCurrency,
           issue_date: formIssueDate?.toISOString().split('T')[0],
           due_date: formDueDate?.toISOString().split('T')[0] || null,
           payment_terms: formPaymentTerms.trim() || null,
@@ -557,6 +632,8 @@ export default function InvoicesScreen() {
           subtotal,
           tax_rate: taxRate,
           tax_amount: taxAmount,
+          processing_fee_amount: processingFeeAmount,
+          pass_processing_fees: formPassFees,
           total,
           user_id: user.id,
         } as any)
@@ -589,6 +666,12 @@ export default function InvoicesScreen() {
       refresh();
       haptics.notification(NotificationFeedbackType.Success);
       showToast('success', t('invoices.invoiceCreated'));
+
+      // Prompt user to send the invoice
+      if (invoiceData) {
+        createdInvoiceRef.current = invoiceData as any as InvoiceRow;
+        setShowSendPrompt(true);
+      }
     } catch (error: any) {
       secureLog.error('Error creating invoice:', error);
       showToast('error', error.message || t('invoices.loadError'));
@@ -605,7 +688,8 @@ export default function InvoicesScreen() {
       const subtotal = calculateSubtotal();
       const taxRate = parseFloat(formTaxRate) || 0;
       const taxAmount = calculateTaxAmount();
-      const total = subtotal + taxAmount;
+      const processingFeeAmount = calculateProcessingFee();
+      const total = subtotal + taxAmount + processingFeeAmount;
 
       const { error: invoiceError } = await mutate({
         table: 'invoices',
@@ -615,6 +699,7 @@ export default function InvoicesScreen() {
           client_id: formClientId,
           project_id: formProjectId || null,
           status: formStatus as InvoiceStatus,
+          currency: formCurrency,
           issue_date: formIssueDate?.toISOString().split('T')[0],
           due_date: formDueDate?.toISOString().split('T')[0] || null,
           payment_terms: formPaymentTerms.trim() || null,
@@ -622,6 +707,8 @@ export default function InvoicesScreen() {
           subtotal,
           tax_rate: taxRate,
           tax_amount: taxAmount,
+          processing_fee_amount: processingFeeAmount,
+          pass_processing_fees: formPassFees,
           total,
         },
         matchValue: selectedInvoice.id,
@@ -704,31 +791,6 @@ export default function InvoicesScreen() {
     }
   };
 
-  const handleMarkSent = async (invoice: InvoiceRow) => {
-    haptics.impact();
-    try {
-      const { error } = await mutate({
-        table: 'invoices',
-        operation: 'update',
-        data: { status: 'sent' },
-        matchValue: invoice.id,
-        cacheKeys: ['invoices'],
-      });
-
-      if (error) throw error;
-
-      if (selectedInvoice?.id === invoice.id) {
-        setSelectedInvoice(prev => prev ? { ...prev, status: 'sent' as InvoiceStatus } : null);
-      }
-      refresh();
-      showToast('success', t('invoices.markedSent'));
-    } catch (error) {
-      secureLog.error('Error marking sent:', error);
-      showToast('error', t('invoices.loadError'));
-      refresh();
-    }
-  };
-
   const handleMarkPaid = async (invoice: InvoiceRow) => {
     haptics.impact();
     try {
@@ -787,7 +849,7 @@ export default function InvoicesScreen() {
       if (clientEmail) {
         const subject = encodeURIComponent(`Invoice ${invoice.invoice_number}`);
         const body = encodeURIComponent(
-          `Hi ${clientName},\n\nPlease find invoice ${invoice.invoice_number} for ${formatCurrency(invoice.total)}.\n\nDue: ${invoice.due_date ? formatDateLong(invoice.due_date) : 'Upon receipt'}\n\nThank you!`
+          `Hi ${clientName},\n\nPlease find invoice ${invoice.invoice_number} for ${formatCurrency(invoice.total, invoice.currency)}.\n\nDue: ${invoice.due_date ? formatDateLong(invoice.due_date) : 'Upon receipt'}\n\nThank you!`
         );
         await Linking.openURL(`mailto:${clientEmail}?subject=${subject}&body=${body}`);
 
@@ -814,6 +876,49 @@ export default function InvoicesScreen() {
     }
   };
 
+  const handleSendReminder = async (invoice: InvoiceRow) => {
+    haptics.impact();
+    const clientEmail = (invoice.client as any)?.email;
+    const clientName = (invoice.client as any)?.name || '';
+
+    try {
+      // Try server-side reminder first
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        const response = await fetch(`${ENV.APP_URL}/api/invoices/${invoice.id}/remind`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (response.ok) {
+          haptics.notification(NotificationFeedbackType.Success);
+          showToast('success', t('invoices.reminderSent'));
+          return;
+        }
+      }
+
+      // Fallback: compose reminder email
+      if (clientEmail) {
+        const subject = encodeURIComponent(`Reminder: Invoice ${invoice.invoice_number}`);
+        const dueText = invoice.due_date ? formatDateLong(invoice.due_date) : 'upon receipt';
+        const body = encodeURIComponent(
+          `Hi ${clientName},\n\nThis is a friendly reminder that invoice ${invoice.invoice_number} for ${formatCurrency(invoice.total, invoice.currency)} is due ${dueText}.\n\nPlease let us know if you have any questions.\n\nThank you!`
+        );
+        await Linking.openURL(`mailto:${clientEmail}?subject=${subject}&body=${body}`);
+        haptics.notification(NotificationFeedbackType.Success);
+        showToast('success', t('invoices.reminderSent'));
+      } else {
+        showToast('error', t('invoices.noClientEmail'));
+      }
+    } catch (error: any) {
+      secureLog.error('Error sending reminder:', error);
+      showToast('error', error.message || t('invoices.sendError'));
+    }
+  };
+
   const handleDownloadPdf = async (invoice: InvoiceRow) => {
     haptics.impact();
     try {
@@ -828,8 +933,9 @@ export default function InvoicesScreen() {
       const projectName = (invoice.project as any)?.name || '';
       const localeStr = locale === 'es' ? 'es-MX' : 'en-US';
 
+      const invoiceCurrency = invoice.currency || 'USD';
       const fmtCurrency = (amount: number) =>
-        new Intl.NumberFormat(localeStr, { style: 'currency', currency: 'USD' }).format(amount);
+        new Intl.NumberFormat(localeStr, { style: 'currency', currency: invoiceCurrency }).format(amount);
 
       const fmtDate = (dateStr: string) =>
         new Date(dateStr).toLocaleDateString(localeStr, { year: 'numeric', month: 'long', day: 'numeric' });
@@ -934,6 +1040,12 @@ export default function InvoicesScreen() {
                 <span>${fmtCurrency(invoice.tax_amount)}</span>
               </div>
             ` : ''}
+            ${invoice.processing_fee_amount > 0 ? `
+              <div class="total-row">
+                <span>${t('invoices.processingFee')}</span>
+                <span>${fmtCurrency(invoice.processing_fee_amount)}</span>
+              </div>
+            ` : ''}
             <div class="total-row grand">
               <span>${t('invoices.total')}</span>
               <span>${fmtCurrency(invoice.total)}</span>
@@ -1034,7 +1146,7 @@ export default function InvoicesScreen() {
           )}
           <View style={styles.totalInfo}>
             <Text style={[styles.totalLabel, { color: colors.textTertiary }]}>{t('invoices.total')}</Text>
-            <Text style={[styles.totalValue, { color: colors.text }]}>{formatCurrency(item.total)}</Text>
+            <Text style={[styles.totalValue, { color: colors.text }]}>{formatCurrency(item.total, item.currency)}</Text>
           </View>
         </View>
 
@@ -1044,10 +1156,19 @@ export default function InvoicesScreen() {
             {displayStatus === 'draft' && (
               <TouchableOpacity
                 style={[styles.quickActionButton, { backgroundColor: colors.infoLight }]}
-                onPress={() => handleMarkSent(item)}
+                onPress={() => handleSendInvoice(item)}
               >
                 <Ionicons name="send-outline" size={14} color={colors.primary} />
-                <Text style={[styles.quickActionText, { color: colors.primary }]}>{t('invoices.markSent')}</Text>
+                <Text style={[styles.quickActionText, { color: colors.primary }]}>{t('invoices.sendInvoice')}</Text>
+              </TouchableOpacity>
+            )}
+            {(displayStatus === 'sent' || displayStatus === 'overdue') && (
+              <TouchableOpacity
+                style={[styles.quickActionButton, { backgroundColor: colors.warningLight }]}
+                onPress={() => handleSendReminder(item)}
+              >
+                <Ionicons name="notifications-outline" size={14} color={colors.warning} />
+                <Text style={[styles.quickActionText, { color: colors.warning }]}>{t('invoices.sendReminder')}</Text>
               </TouchableOpacity>
             )}
             {(displayStatus === 'sent' || displayStatus === 'overdue') && (
@@ -1063,7 +1184,7 @@ export default function InvoicesScreen() {
         )}
       </TouchableOpacity>
     );
-  }, [colors, t, getDisplayStatus, statusConfig, formatDate, formatCurrency, openViewModal, handleMarkSent, handleMarkPaid]);
+  }, [colors, t, getDisplayStatus, statusConfig, formatDate, formatCurrency, openViewModal, handleSendInvoice, handleSendReminder, handleMarkPaid]);
 
   // ─── Line items form (shared between add & edit) ──────
   const renderLineItemsForm = () => (
@@ -1111,7 +1232,7 @@ export default function InvoicesScreen() {
             <View style={styles.lineItemTotal}>
               <Text style={[styles.lineItemTotalLabel, { color: colors.textTertiary }]}>{t('invoices.amount')}</Text>
               <Text style={[styles.lineItemTotalValue, { color: colors.text }]}>
-                {formatCurrency(item.quantity * item.unit_price)}
+                {formatCurrency(item.quantity * item.unit_price, formCurrency)}
               </Text>
             </View>
           </View>
@@ -1127,19 +1248,27 @@ export default function InvoicesScreen() {
       <View style={[styles.totalsContainer, { backgroundColor: colors.primary + '10' }]}>
         <View style={styles.totalsRow}>
           <Text style={[styles.totalsLabel, { color: colors.textSecondary }]}>{t('invoices.subtotal')}</Text>
-          <Text style={[styles.totalsValue, { color: colors.text }]}>{formatCurrency(calculateSubtotal())}</Text>
+          <Text style={[styles.totalsValue, { color: colors.text }]}>{formatCurrency(calculateSubtotal(), formCurrency)}</Text>
         </View>
         {(parseFloat(formTaxRate) || 0) > 0 && (
           <View style={styles.totalsRow}>
             <Text style={[styles.totalsLabel, { color: colors.textSecondary }]}>
               {t('invoices.tax')} ({formTaxRate}%)
             </Text>
-            <Text style={[styles.totalsValue, { color: colors.text }]}>{formatCurrency(calculateTaxAmount())}</Text>
+            <Text style={[styles.totalsValue, { color: colors.text }]}>{formatCurrency(calculateTaxAmount(), formCurrency)}</Text>
+          </View>
+        )}
+        {formPassFees && calculateProcessingFee() > 0 && (
+          <View style={styles.totalsRow}>
+            <Text style={[styles.totalsLabel, { color: colors.textSecondary }]}>
+              {t('invoices.processingFee')}
+            </Text>
+            <Text style={[styles.totalsValue, { color: colors.text }]}>{formatCurrency(calculateProcessingFee(), formCurrency)}</Text>
           </View>
         )}
         <View style={[styles.totalsRow, styles.totalsFinal]}>
           <Text style={[styles.totalsFinalLabel, { color: colors.text }]}>{t('invoices.invoiceTotal')}</Text>
-          <Text style={[styles.totalsFinalValue, { color: colors.primary }]}>{formatCurrency(calculateTotal())}</Text>
+          <Text style={[styles.totalsFinalValue, { color: colors.primary }]}>{formatCurrency(calculateTotal(), formCurrency)}</Text>
         </View>
       </View>
     </>
@@ -1181,6 +1310,14 @@ export default function InvoicesScreen() {
         value={formStatus}
         onChange={setFormStatus}
         placeholder={t('invoices.status')}
+      />
+
+      <Select
+        label={t('invoices.currency')}
+        options={CURRENCY_OPTIONS}
+        value={formCurrency}
+        onChange={(val) => setFormCurrency(val as InvoiceCurrency)}
+        placeholder={t('invoices.currency')}
       />
 
       <DatePicker
@@ -1264,16 +1401,16 @@ export default function InvoicesScreen() {
       <View style={styles.summaryContainer}>
         <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.summaryLabel, { color: colors.textTertiary }]}>{t('invoices.totalInvoiced')}</Text>
-          <Text style={[styles.summaryValue, { color: colors.text }]}>{formatCurrency(stats.total, false)}</Text>
+          <Text style={[styles.summaryValue, { color: colors.text }]}>{formatCurrency(stats.total, 'USD', false)}</Text>
         </View>
         <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.summaryLabel, { color: colors.textTertiary }]}>{t('invoices.totalPaid')}</Text>
-          <Text style={[styles.summaryValue, { color: colors.success }]}>{formatCurrency(stats.paid, false)}</Text>
+          <Text style={[styles.summaryValue, { color: colors.success }]}>{formatCurrency(stats.paid, 'USD', false)}</Text>
         </View>
         <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.summaryLabel, { color: colors.textTertiary }]}>{t('invoices.outstanding')}</Text>
           <Text style={[styles.summaryValue, { color: stats.outstanding > 0 ? colors.warning : colors.textSecondary }]}>
-            {formatCurrency(stats.outstanding, false)}
+            {formatCurrency(stats.outstanding, 'USD', false)}
           </Text>
         </View>
       </View>
@@ -1475,11 +1612,11 @@ export default function InvoicesScreen() {
                     <View style={styles.viewLineItemLeft}>
                       <Text style={[styles.viewLineItemDesc, { color: colors.text }]}>{item.description}</Text>
                       <Text style={[styles.viewLineItemQty, { color: colors.textSecondary }]}>
-                        {item.quantity} x {formatCurrency(item.unit_price)}
+                        {item.quantity} x {formatCurrency(item.unit_price, selectedInvoice.currency)}
                       </Text>
                     </View>
                     <Text style={[styles.viewLineItemAmount, { color: colors.text }]}>
-                      {formatCurrency(item.amount)}
+                      {formatCurrency(item.amount, selectedInvoice.currency)}
                     </Text>
                   </View>
                 ))}
@@ -1490,19 +1627,27 @@ export default function InvoicesScreen() {
             <View style={[styles.viewTotals, { backgroundColor: colors.primary + '10' }]}>
               <View style={styles.viewTotalRow}>
                 <Text style={[styles.viewTotalLabel, { color: colors.textSecondary }]}>{t('invoices.subtotal')}</Text>
-                <Text style={[styles.viewTotalValue, { color: colors.text }]}>{formatCurrency(selectedInvoice.subtotal)}</Text>
+                <Text style={[styles.viewTotalValue, { color: colors.text }]}>{formatCurrency(selectedInvoice.subtotal, selectedInvoice.currency)}</Text>
               </View>
               {selectedInvoice.tax_rate > 0 && (
                 <View style={styles.viewTotalRow}>
                   <Text style={[styles.viewTotalLabel, { color: colors.textSecondary }]}>
                     {t('invoices.tax')} ({selectedInvoice.tax_rate}%)
                   </Text>
-                  <Text style={[styles.viewTotalValue, { color: colors.text }]}>{formatCurrency(selectedInvoice.tax_amount)}</Text>
+                  <Text style={[styles.viewTotalValue, { color: colors.text }]}>{formatCurrency(selectedInvoice.tax_amount, selectedInvoice.currency)}</Text>
+                </View>
+              )}
+              {selectedInvoice.processing_fee_amount > 0 && (
+                <View style={styles.viewTotalRow}>
+                  <Text style={[styles.viewTotalLabel, { color: colors.textSecondary }]}>
+                    {t('invoices.processingFee')}
+                  </Text>
+                  <Text style={[styles.viewTotalValue, { color: colors.text }]}>{formatCurrency(selectedInvoice.processing_fee_amount, selectedInvoice.currency)}</Text>
                 </View>
               )}
               <View style={[styles.viewTotalRow, { paddingTop: Spacing.sm, borderTopWidth: 1, borderTopColor: colors.borderLight }]}>
                 <Text style={[styles.viewTotalFinalLabel, { color: colors.text }]}>{t('invoices.invoiceTotal')}</Text>
-                <Text style={[styles.viewTotalFinalValue, { color: colors.primary }]}>{formatCurrency(selectedInvoice.total)}</Text>
+                <Text style={[styles.viewTotalFinalValue, { color: colors.primary }]}>{formatCurrency(selectedInvoice.total, selectedInvoice.currency)}</Text>
               </View>
             </View>
 
@@ -1527,13 +1672,13 @@ export default function InvoicesScreen() {
                     <Text style={[styles.viewActionPillText, { color: colors.primary }]}>{t('invoices.sendInvoice')}</Text>
                   </TouchableOpacity>
                 )}
-                {getDisplayStatus(selectedInvoice) === 'draft' && (
+                {(getDisplayStatus(selectedInvoice) === 'sent' || getDisplayStatus(selectedInvoice) === 'overdue') && (
                   <TouchableOpacity
-                    style={[styles.viewActionPill, { backgroundColor: colors.surfaceSecondary }]}
-                    onPress={() => handleMarkSent(selectedInvoice)}
+                    style={[styles.viewActionPill, { backgroundColor: colors.warningLight }]}
+                    onPress={() => handleSendReminder(selectedInvoice)}
                   >
-                    <Ionicons name="checkmark-outline" size={16} color={colors.textSecondary} />
-                    <Text style={[styles.viewActionPillText, { color: colors.textSecondary }]}>{t('invoices.markSent')}</Text>
+                    <Ionicons name="notifications-outline" size={16} color={colors.warning} />
+                    <Text style={[styles.viewActionPillText, { color: colors.warning }]}>{t('invoices.sendReminder')}</Text>
                   </TouchableOpacity>
                 )}
                 {(getDisplayStatus(selectedInvoice) === 'sent' || getDisplayStatus(selectedInvoice) === 'overdue') && (
@@ -1677,6 +1822,25 @@ export default function InvoicesScreen() {
           setInvoiceToDelete(null);
         }}
         variant="danger"
+      />
+
+      {/* ─── Send Prompt after creation ──────────────── */}
+      <ConfirmDialog
+        visible={showSendPrompt}
+        title={t('invoices.sendPromptTitle')}
+        message={t('invoices.sendPromptMessage', { number: createdInvoiceRef.current?.invoice_number || '' })}
+        confirmLabel={t('invoices.sendNow')}
+        onConfirm={() => {
+          setShowSendPrompt(false);
+          if (createdInvoiceRef.current) {
+            handleSendInvoice(createdInvoiceRef.current);
+          }
+          createdInvoiceRef.current = null;
+        }}
+        onCancel={() => {
+          setShowSendPrompt(false);
+          createdInvoiceRef.current = null;
+        }}
       />
     </SafeAreaView>
   );

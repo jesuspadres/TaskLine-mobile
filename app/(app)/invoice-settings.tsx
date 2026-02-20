@@ -38,6 +38,11 @@ export default function InvoiceSettingsScreen() {
   const [defaultInvoiceNotes, setDefaultInvoiceNotes] = useState('');
   const [autoSendInvoice, setAutoSendInvoice] = useState(false);
 
+  // Processing fees
+  const [hasStripeConnect, setHasStripeConnect] = useState(false);
+  const [passProcessingFees, setPassProcessingFees] = useState(false);
+  const [processingFeePercentage, setProcessingFeePercentage] = useState('2.90');
+
   const currencyOptions = useMemo(() => [
     { key: 'USD', label: 'USD ($)' },
     { key: 'MXN', label: 'MXN ($)' },
@@ -62,7 +67,7 @@ export default function InvoiceSettingsScreen() {
     const loadSettings = async () => {
       try {
         const { data, error } = await (supabase.from('user_settings') as any)
-          .select('payment_instructions, default_tax_rate, default_currency, default_payment_terms, default_invoice_notes, auto_send_invoice')
+          .select('payment_instructions, default_tax_rate, default_currency, default_payment_terms, default_invoice_notes, auto_send_invoice, stripe_account_id, stripe_connect_onboarded, pass_processing_fees, processing_fee_percentage')
           .eq('user_id', user.id)
           .single();
 
@@ -77,6 +82,9 @@ export default function InvoiceSettingsScreen() {
           setDefaultPaymentTerms(data.default_payment_terms || '');
           setDefaultInvoiceNotes(data.default_invoice_notes || '');
           setAutoSendInvoice(!!data.auto_send_invoice);
+          setHasStripeConnect(!!data.stripe_account_id && !!data.stripe_connect_onboarded);
+          setPassProcessingFees(!!data.pass_processing_fees);
+          setProcessingFeePercentage(data.processing_fee_percentage != null ? String(data.processing_fee_percentage) : '2.90');
         }
       } catch (error: any) {
         showToast('error', error.message || t('common.error'));
@@ -95,6 +103,8 @@ export default function InvoiceSettingsScreen() {
     try {
       const taxRate = defaultTaxRate.trim() ? parseFloat(defaultTaxRate) : null;
 
+      const feePercentage = processingFeePercentage.trim() ? parseFloat(processingFeePercentage) : 2.90;
+
       const { error } = await (supabase.from('user_settings') as any).upsert(
         {
           user_id: user.id,
@@ -104,6 +114,8 @@ export default function InvoiceSettingsScreen() {
           default_payment_terms: defaultPaymentTerms || null,
           default_invoice_notes: defaultInvoiceNotes.trim() || null,
           auto_send_invoice: autoSendInvoice,
+          pass_processing_fees: passProcessingFees,
+          processing_fee_percentage: feePercentage,
         } as any,
         { onConflict: 'user_id' }
       );
@@ -315,6 +327,85 @@ export default function InvoiceSettingsScreen() {
             />
           </View>
 
+          {/* Processing Fees (Stripe Connect only) */}
+          {hasStripeConnect && (
+            <>
+              <View style={[styles.sectionDivider, { borderTopColor: colors.borderLight }]} />
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                {t('invoiceSettings.processingFeesTitle')}
+              </Text>
+
+              <View style={[styles.toggleRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <View style={styles.toggleContent}>
+                  <Text style={[styles.toggleLabel, { color: colors.text }]}>
+                    {t('invoiceSettings.passProcessingFees')}
+                  </Text>
+                  <Text style={[styles.toggleDescription, { color: colors.textSecondary }]}>
+                    {t('invoiceSettings.passProcessingFeesDescription')}
+                  </Text>
+                </View>
+                <Switch
+                  value={passProcessingFees}
+                  onValueChange={setPassProcessingFees}
+                  trackColor={{ false: colors.border, true: colors.primary + '60' }}
+                  thumbColor={passProcessingFees ? colors.primary : colors.textTertiary}
+                />
+              </View>
+
+              {passProcessingFees && (
+                <>
+                  <View style={styles.inputGroup}>
+                    <Text style={[styles.inputLabel, { color: colors.text }]}>
+                      {t('invoiceSettings.feePercentage')}
+                    </Text>
+                    <View
+                      style={[
+                        styles.inputWrapper,
+                        {
+                          backgroundColor: colors.surface,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name="trending-up-outline"
+                        size={20}
+                        color={colors.textTertiary}
+                        style={styles.inputIcon}
+                      />
+                      <TextInput
+                        style={[styles.input, { color: colors.text }]}
+                        value={processingFeePercentage}
+                        onChangeText={setProcessingFeePercentage}
+                        placeholder="2.90"
+                        placeholderTextColor={colors.textTertiary}
+                        keyboardType="decimal-pad"
+                      />
+                      <Text style={[styles.inputSuffix, { color: colors.textTertiary }]}>%</Text>
+                    </View>
+                  </View>
+
+                  <View style={[styles.feeInfoCard, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+                    <Text style={[styles.feeInfoTitle, { color: colors.text }]}>
+                      {t('invoiceSettings.fixedFee')}
+                    </Text>
+                    <View style={styles.feeGrid}>
+                      <Text style={[styles.feeItem, { color: colors.textSecondary }]}>USD $0.30</Text>
+                      <Text style={[styles.feeItem, { color: colors.textSecondary }]}>EUR €0.25</Text>
+                      <Text style={[styles.feeItem, { color: colors.textSecondary }]}>GBP £0.20</Text>
+                      <Text style={[styles.feeItem, { color: colors.textSecondary }]}>CAD $0.30</Text>
+                      <Text style={[styles.feeItem, { color: colors.textSecondary }]}>AUD $0.30</Text>
+                      <Text style={[styles.feeItem, { color: colors.textSecondary }]}>MXN $3.00</Text>
+                    </View>
+                    <Text style={[styles.feeInfoNote, { color: colors.textTertiary }]}>
+                      {t('invoiceSettings.fixedFeeAuto')}
+                    </Text>
+                  </View>
+                </>
+              )}
+            </>
+          )}
+
           {/* Save Button */}
           <TouchableOpacity
             style={[
@@ -463,5 +554,39 @@ const styles = StyleSheet.create({
   toggleDescription: {
     fontSize: FontSizes.sm,
     lineHeight: 18,
+  },
+  sectionDivider: {
+    borderTopWidth: 1,
+    marginVertical: Spacing.lg,
+  },
+  sectionTitle: {
+    fontSize: FontSizes.lg,
+    fontWeight: '700',
+    marginBottom: Spacing.md,
+  },
+  feeInfoCard: {
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    padding: Spacing.lg,
+    marginBottom: Spacing.xl,
+  },
+  feeInfoTitle: {
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
+    marginBottom: Spacing.sm,
+  },
+  feeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  feeItem: {
+    fontSize: FontSizes.sm,
+    width: '30%',
+  },
+  feeInfoNote: {
+    fontSize: FontSizes.xs,
+    fontStyle: 'italic',
   },
 });

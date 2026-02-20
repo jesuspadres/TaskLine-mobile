@@ -20,7 +20,7 @@ import { supabase } from '@/lib/supabase';
 import { secureLog } from '@/lib/security';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import {
-  Modal, Input, Button, Badge, Select, EmptyState, ListSkeleton, StatusBadge, showToast,
+  Modal, Input, Button, Badge, Select, EmptyState, ListSkeleton, StatusBadge, DatePicker, ConfirmDialog, showToast,
 } from '@/components';
 import { useAuthStore } from '@/stores/authStore';
 import { useTheme } from '@/hooks/useTheme';
@@ -35,12 +35,31 @@ interface PropertyClient {
   email?: string;
 }
 
-interface LinkedProject {
+interface Equipment {
   id: string;
   name: string;
-  status: string;
-  budget_total: number | null;
-  deadline: string | null;
+  category?: string;
+  brand?: string;
+  model?: string;
+  serial_number?: string;
+  location?: string;
+  condition?: string;
+  install_date?: string;
+  warranty_expiration?: string;
+  last_service_date?: string;
+  service_interval_months?: number;
+  notes?: string;
+  created_at: string;
+}
+
+interface ServiceHistoryItem {
+  id: string;
+  project_name: string;
+  project_status: string;
+  project_description?: string;
+  scheduled_date?: string;
+  completed_date?: string;
+  total_amount?: number;
 }
 
 export default function PropertyDetailScreen() {
@@ -54,7 +73,8 @@ export default function PropertyDetailScreen() {
   interface PropertyDetailData {
     property: Property | null;
     clientInfo: PropertyClient | null;
-    linkedProjects: LinkedProject[];
+    equipment: Equipment[];
+    serviceHistory: ServiceHistoryItem[];
     clients: Client[];
   }
 
@@ -70,16 +90,15 @@ export default function PropertyDetailScreen() {
 
       const { clients: clientData, ...propData } = data as any;
 
-      let projects: LinkedProject[] = [];
-      if (clientData?.id) {
-        const { data: projData } = await supabase
-          .from('projects')
-          .select('id, name, status, budget_total, deadline')
-          .eq('client_id', clientData.id)
-          .order('created_at', { ascending: false })
-          .limit(10);
-        projects = (projData as LinkedProject[]) ?? [];
-      }
+      // Load equipment
+      const { data: equipmentData } = await (supabase.from('property_equipment') as any)
+        .select('*')
+        .eq('property_id', id!)
+        .eq('user_id', user!.id)
+        .order('created_at', { ascending: false });
+
+      // Load service history via RPC
+      const { data: historyData } = await (supabase.rpc as any)('get_property_service_history', { p_property_id: id });
 
       const { data: clientsList } = await supabase
         .from('clients')
@@ -89,16 +108,21 @@ export default function PropertyDetailScreen() {
       return {
         property: propData as Property,
         clientInfo: clientData as PropertyClient | null,
-        linkedProjects: projects,
+        equipment: (equipmentData as Equipment[]) ?? [],
+        serviceHistory: (historyData as ServiceHistoryItem[]) ?? [],
         clients: (clientsList as Client[]) ?? [],
       };
     },
     { enabled: !!id },
   );
 
-  const { property, clientInfo, linkedProjects, clients } = detailData ?? {
-    property: null, clientInfo: null, linkedProjects: [], clients: [],
-  };
+  const {
+    property = null,
+    clientInfo = null,
+    equipment = [],
+    serviceHistory = [],
+    clients = [],
+  } = detailData ?? {};
 
   // Edit modal
   const [showEditModal, setShowEditModal] = useState(false);
@@ -112,6 +136,24 @@ export default function PropertyDetailScreen() {
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
+  // Equipment modal state
+  const [showViewEquipmentModal, setShowViewEquipmentModal] = useState(false);
+  const [viewingEquipment, setViewingEquipment] = useState<Equipment | null>(null);
+  const [showEquipmentModal, setShowEquipmentModal] = useState(false);
+  const [editingEquipment, setEditingEquipment] = useState<Equipment | null>(null);
+  const [equipmentSaving, setEquipmentSaving] = useState(false);
+  const [showDeleteEquipmentConfirm, setShowDeleteEquipmentConfirm] = useState(false);
+  const [equipForm, setEquipForm] = useState({
+    name: '', category: '', brand: '', model: '', serial_number: '',
+    location: '', condition: '',
+    install_date: null as Date | null,
+    warranty_expiration: null as Date | null,
+    last_service_date: null as Date | null,
+    service_interval_months: '',
+    notes: '',
+  });
+  const [equipFormErrors, setEquipFormErrors] = useState<Record<string, string>>({});
+
   const dateLocale = locale === 'es' ? 'es-ES' : 'en-US';
 
   const propertyTypeOptions = useMemo(() => [
@@ -123,6 +165,29 @@ export default function PropertyDetailScreen() {
   const clientOptions = useMemo(() =>
     clients.map((c) => ({ key: c.id, label: (c as any).email ? `${c.name} (${(c as any).email})` : c.name })),
   [clients]);
+
+  const categoryOptions = useMemo(() => [
+    { key: 'hvac', label: t('propertyDetail.categoryHvac') },
+    { key: 'plumbing', label: t('propertyDetail.categoryPlumbing') },
+    { key: 'electrical', label: t('propertyDetail.categoryElectrical') },
+    { key: 'appliance', label: t('propertyDetail.categoryAppliance') },
+    { key: 'other', label: t('propertyDetail.categoryOther') },
+  ], [t]);
+
+  const conditionOptions = useMemo(() => [
+    { key: 'excellent', label: t('propertyDetail.conditionExcellent') },
+    { key: 'good', label: t('propertyDetail.conditionGood') },
+    { key: 'fair', label: t('propertyDetail.conditionFair') },
+    { key: 'poor', label: t('propertyDetail.conditionPoor') },
+  ], [t]);
+
+  const intervalOptions = useMemo(() => [
+    { key: '1', label: t('propertyDetail.monthly') },
+    { key: '3', label: t('propertyDetail.quarterly') },
+    { key: '6', label: t('propertyDetail.semiAnnually') },
+    { key: '12', label: t('propertyDetail.annually') },
+    { key: '24', label: t('propertyDetail.biannually') },
+  ], [t]);
 
   const onRefresh = useCallback(() => {
     refresh();
@@ -236,7 +301,186 @@ export default function PropertyDetailScreen() {
     );
   };
 
+  // ─── Equipment CRUD ───────────────────────────────────────
+
+  const resetEquipForm = () => {
+    setEquipForm({
+      name: '', category: '', brand: '', model: '', serial_number: '',
+      location: '', condition: '',
+      install_date: null, warranty_expiration: null, last_service_date: null,
+      service_interval_months: '', notes: '',
+    });
+    setEquipFormErrors({});
+  };
+
+  const openAddEquipment = () => {
+    haptics.impact(Haptics.ImpactFeedbackStyle.Light);
+    setEditingEquipment(null);
+    resetEquipForm();
+    setShowEquipmentModal(true);
+  };
+
+  const openViewEquipment = (item: Equipment) => {
+    haptics.impact(Haptics.ImpactFeedbackStyle.Light);
+    setViewingEquipment(item);
+    setShowViewEquipmentModal(true);
+  };
+
+  const openEditFromView = () => {
+    if (!viewingEquipment) return;
+    const item = viewingEquipment;
+    setShowViewEquipmentModal(false);
+    setEditingEquipment(item);
+    setEquipForm({
+      name: item.name,
+      category: item.category || '',
+      brand: item.brand || '',
+      model: item.model || '',
+      serial_number: item.serial_number || '',
+      location: item.location || '',
+      condition: item.condition || '',
+      install_date: item.install_date ? new Date(item.install_date) : null,
+      warranty_expiration: item.warranty_expiration ? new Date(item.warranty_expiration) : null,
+      last_service_date: item.last_service_date ? new Date(item.last_service_date) : null,
+      service_interval_months: item.service_interval_months ? String(item.service_interval_months) : '',
+      notes: item.notes || '',
+    });
+    setEquipFormErrors({});
+    setShowEquipmentModal(true);
+  };
+
+  const validateEquipForm = () => {
+    const errors: Record<string, string> = {};
+    if (!equipForm.name.trim()) errors.name = t('propertyDetail.equipmentNameRequired');
+    setEquipFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const formatDateForDB = (date: Date | null) => {
+    if (!date) return null;
+    return date.toISOString().split('T')[0];
+  };
+
+  const handleSaveEquipment = async () => {
+    if (!validateEquipForm() || !user) return;
+    setEquipmentSaving(true);
+    try {
+      const payload: Record<string, any> = {
+        name: equipForm.name.trim(),
+        category: equipForm.category || null,
+        brand: equipForm.brand.trim() || null,
+        model: equipForm.model.trim() || null,
+        serial_number: equipForm.serial_number.trim() || null,
+        location: equipForm.location.trim() || null,
+        condition: equipForm.condition || null,
+        install_date: formatDateForDB(equipForm.install_date),
+        warranty_expiration: formatDateForDB(equipForm.warranty_expiration),
+        last_service_date: formatDateForDB(equipForm.last_service_date),
+        service_interval_months: equipForm.service_interval_months ? Number(equipForm.service_interval_months) : null,
+        notes: equipForm.notes.trim() || null,
+      };
+
+      if (editingEquipment) {
+        const { error } = await (supabase.from('property_equipment') as any)
+          .update(payload)
+          .eq('id', editingEquipment.id)
+          .eq('user_id', user.id);
+        if (error) throw error;
+        showToast('success', t('propertyDetail.equipmentSaved'));
+      } else {
+        payload.property_id = id;
+        payload.user_id = user.id;
+        const { error } = await (supabase.from('property_equipment') as any)
+          .insert(payload);
+        if (error) throw error;
+        showToast('success', t('propertyDetail.equipmentCreated'));
+      }
+
+      haptics.notification(Haptics.NotificationFeedbackType.Success);
+      setShowEquipmentModal(false);
+      refresh();
+    } catch (error: any) {
+      secureLog.error('Equipment save error:', error);
+      showToast('error', error.message || t('propertyDetail.loadError'));
+    } finally {
+      setEquipmentSaving(false);
+    }
+  };
+
+  const handleDeleteEquipment = async () => {
+    if (!editingEquipment || !user) return;
+    try {
+      const { error } = await (supabase.from('property_equipment') as any)
+        .delete()
+        .eq('id', editingEquipment.id)
+        .eq('user_id', user.id);
+      if (error) throw error;
+      haptics.notification(Haptics.NotificationFeedbackType.Success);
+      setShowDeleteEquipmentConfirm(false);
+      setShowEquipmentModal(false);
+      setShowViewEquipmentModal(false);
+      setViewingEquipment(null);
+      refresh();
+      showToast('success', t('propertyDetail.equipmentDeleted'));
+    } catch (error: any) {
+      secureLog.error('Equipment delete error:', error);
+      showToast('error', error.message || t('propertyDetail.loadError'));
+    }
+  };
+
   // ─── Helpers ───────────────────────────────────────────────
+
+  const getCategoryIcon = (category?: string): string => {
+    switch (category) {
+      case 'hvac': return 'snow-outline';
+      case 'plumbing': return 'water-outline';
+      case 'electrical': return 'flash-outline';
+      case 'appliance': return 'tv-outline';
+      default: return 'build-outline';
+    }
+  };
+
+  const getCategoryLabel = (category?: string): string => {
+    switch (category) {
+      case 'hvac': return t('propertyDetail.categoryHvac');
+      case 'plumbing': return t('propertyDetail.categoryPlumbing');
+      case 'electrical': return t('propertyDetail.categoryElectrical');
+      case 'appliance': return t('propertyDetail.categoryAppliance');
+      case 'other': return t('propertyDetail.categoryOther');
+      default: return '';
+    }
+  };
+
+  const getConditionColor = (condition?: string) => {
+    switch (condition) {
+      case 'excellent': return { bg: colors.successLight, text: colors.success };
+      case 'good': return { bg: colors.infoLight, text: colors.info };
+      case 'fair': return { bg: colors.warningLight, text: colors.warning };
+      case 'poor': return { bg: colors.errorLight, text: colors.error };
+      default: return { bg: colors.surfaceSecondary, text: colors.textSecondary };
+    }
+  };
+
+  const getConditionLabel = (condition?: string): string => {
+    switch (condition) {
+      case 'excellent': return t('propertyDetail.conditionExcellent');
+      case 'good': return t('propertyDetail.conditionGood');
+      case 'fair': return t('propertyDetail.conditionFair');
+      case 'poor': return t('propertyDetail.conditionPoor');
+      default: return '';
+    }
+  };
+
+  const getIntervalLabel = (months?: number): string => {
+    switch (months) {
+      case 1: return t('propertyDetail.monthly');
+      case 3: return t('propertyDetail.quarterly');
+      case 6: return t('propertyDetail.semiAnnually');
+      case 12: return t('propertyDetail.annually');
+      case 24: return t('propertyDetail.biannually');
+      default: return '';
+    }
+  };
 
   const formatAddress = () => {
     if (!property) return null;
@@ -619,42 +863,122 @@ export default function PropertyDetailScreen() {
           </View>
         )}
 
-        {/* Linked Projects */}
+        {/* Equipment */}
         <View style={[styles.infoCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[styles.sectionLabel, { color: colors.textTertiary }]}>
-            {t('propertyDetail.linkedProjects')}
-          </Text>
-          {linkedProjects.length === 0 ? (
+          <View style={styles.sectionHeaderRow}>
+            <View style={styles.sectionHeaderLeft}>
+              <Ionicons name="build-outline" size={16} color={colors.textTertiary} />
+              <Text style={[styles.sectionLabel, { color: colors.textTertiary, marginBottom: 0 }]}>
+                {t('propertyDetail.equipment')}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.addEquipBtn, { backgroundColor: colors.primary }]}
+              onPress={openAddEquipment}
+            >
+              <Ionicons name="add" size={16} color="#fff" />
+              <Text style={styles.addEquipBtnText}>{t('propertyDetail.addEquipment')}</Text>
+            </TouchableOpacity>
+          </View>
+          {equipment.length === 0 ? (
             <Text style={[styles.emptyText, { color: colors.textTertiary }]}>
-              {t('propertyDetail.noProjects')}
+              {t('propertyDetail.noEquipment')}
             </Text>
           ) : (
-            linkedProjects.map((project, idx) => (
+            equipment.map((item, idx) => {
+              const condColor = getConditionColor(item.condition);
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[
+                    styles.equipmentRow,
+                    idx < equipment.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.borderLight },
+                  ]}
+                  onPress={() => openViewEquipment(item)}
+                >
+                  <View style={[styles.equipmentIcon, { backgroundColor: colors.surfaceSecondary }]}>
+                    <Ionicons name={getCategoryIcon(item.category) as any} size={20} color={colors.primary} />
+                  </View>
+                  <View style={styles.equipmentInfo}>
+                    <Text style={[styles.equipmentName, { color: colors.text }]} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                    <Text style={[styles.equipmentSub, { color: colors.textSecondary }]} numberOfLines={1}>
+                      {[item.brand, item.model, item.location].filter(Boolean).join(' · ') || getCategoryLabel(item.category)}
+                    </Text>
+                  </View>
+                  <View style={styles.equipmentRight}>
+                    {item.condition && (
+                      <View style={[styles.conditionBadge, { backgroundColor: condColor.bg }]}>
+                        <Text style={[styles.conditionBadgeText, { color: condColor.text }]}>
+                          {getConditionLabel(item.condition)}
+                        </Text>
+                      </View>
+                    )}
+                    {item.last_service_date && (
+                      <Text style={[styles.equipmentDate, { color: colors.textTertiary }]}>
+                        {formatDate(item.last_service_date)}
+                      </Text>
+                    )}
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+                </TouchableOpacity>
+              );
+            })
+          )}
+        </View>
+
+        {/* Service History */}
+        <View style={[styles.infoCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View style={styles.sectionHeaderLeft}>
+            <Ionicons name="clipboard-outline" size={16} color={colors.textTertiary} />
+            <Text style={[styles.sectionLabel, { color: colors.textTertiary, marginBottom: 0 }]}>
+              {t('propertyDetail.serviceHistory')}
+            </Text>
+          </View>
+          {serviceHistory.length === 0 ? (
+            <Text style={[styles.emptyText, { color: colors.textTertiary, marginTop: Spacing.md }]}>
+              {t('propertyDetail.noServiceHistory')}
+            </Text>
+          ) : (
+            serviceHistory.map((item, idx) => (
               <TouchableOpacity
-                key={project.id}
+                key={item.id}
                 style={[
                   styles.projectRow,
-                  idx < linkedProjects.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.borderLight },
+                  idx < serviceHistory.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.borderLight },
                 ]}
                 onPress={() => {
                   haptics.impact(Haptics.ImpactFeedbackStyle.Light);
-                  router.push(`/(app)/project-detail?id=${project.id}` as any);
+                  router.push(`/(app)/project-detail?id=${item.id}` as any);
                 }}
               >
                 <View style={styles.projectInfo}>
                   <Text style={[styles.projectName, { color: colors.text }]} numberOfLines={1}>
-                    {project.name}
+                    {item.project_name}
                   </Text>
+                  {item.project_description && (
+                    <Text style={[styles.equipmentSub, { color: colors.textSecondary }]} numberOfLines={1}>
+                      {item.project_description}
+                    </Text>
+                  )}
                   <View style={styles.projectMeta}>
-                    <StatusBadge status={project.status as any} />
-                    {project.budget_total != null && (
+                    <StatusBadge status={item.project_status as any} />
+                    {(item.completed_date || item.scheduled_date) && (
                       <Text style={[styles.projectBudget, { color: colors.textSecondary }]}>
-                        {formatCurrency(project.budget_total)}
+                        {formatDate(item.completed_date || item.scheduled_date!)}
                       </Text>
                     )}
                   </View>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+                <View style={styles.serviceHistoryRight}>
+                  {item.total_amount != null && item.total_amount > 0 && (
+                    <Text style={[styles.serviceAmount, { color: colors.text }]}>
+                      {formatCurrency(item.total_amount)}
+                    </Text>
+                  )}
+                  <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+                </View>
               </TouchableOpacity>
             ))
           )}
@@ -859,6 +1183,299 @@ export default function PropertyDetailScreen() {
           />
         </View>
       </Modal>
+
+      {/* View Equipment Modal */}
+      <Modal
+        visible={showViewEquipmentModal}
+        onClose={() => setShowViewEquipmentModal(false)}
+        title={t('propertyDetail.viewEquipment')}
+        size="full"
+      >
+        {viewingEquipment && (() => {
+          const eq = viewingEquipment;
+          const condColor = getConditionColor(eq.condition);
+          const isWarrantyExpired = eq.warranty_expiration && new Date(eq.warranty_expiration) < new Date();
+          return (
+            <View>
+              {/* Header with icon and name */}
+              <View style={styles.viewEquipHeader}>
+                <View style={[styles.viewEquipIconLarge, { backgroundColor: colors.surfaceSecondary }]}>
+                  <Ionicons name={getCategoryIcon(eq.category) as any} size={32} color={colors.primary} />
+                </View>
+                <Text style={[styles.viewEquipName, { color: colors.text }]}>{eq.name}</Text>
+                {eq.condition && (
+                  <View style={[styles.conditionBadge, { backgroundColor: condColor.bg }]}>
+                    <Text style={[styles.conditionBadgeText, { color: condColor.text }]}>
+                      {getConditionLabel(eq.condition)}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Equipment Details */}
+              <Text style={[styles.formSectionLabel, { color: colors.text, borderTopWidth: 0, marginTop: 0 }]}>
+                {t('propertyDetail.equipmentDetails')}
+              </Text>
+              <View style={[styles.viewDetailCard, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+                {eq.category && (
+                  <View style={styles.viewDetailRow}>
+                    <Text style={[styles.viewDetailLabel, { color: colors.textSecondary }]}>{t('propertyDetail.equipmentCategory')}</Text>
+                    <Text style={[styles.viewDetailValue, { color: colors.text }]}>{getCategoryLabel(eq.category)}</Text>
+                  </View>
+                )}
+                {eq.brand && (
+                  <View style={styles.viewDetailRow}>
+                    <Text style={[styles.viewDetailLabel, { color: colors.textSecondary }]}>{t('propertyDetail.brand')}</Text>
+                    <Text style={[styles.viewDetailValue, { color: colors.text }]}>{eq.brand}</Text>
+                  </View>
+                )}
+                {eq.model && (
+                  <View style={styles.viewDetailRow}>
+                    <Text style={[styles.viewDetailLabel, { color: colors.textSecondary }]}>{t('propertyDetail.model')}</Text>
+                    <Text style={[styles.viewDetailValue, { color: colors.text }]}>{eq.model}</Text>
+                  </View>
+                )}
+                {eq.serial_number && (
+                  <View style={styles.viewDetailRow}>
+                    <Text style={[styles.viewDetailLabel, { color: colors.textSecondary }]}>{t('propertyDetail.serialNumber')}</Text>
+                    <Text style={[styles.viewDetailValueMono, { color: colors.text }]}>{eq.serial_number}</Text>
+                  </View>
+                )}
+                {eq.location && (
+                  <View style={styles.viewDetailRow}>
+                    <Text style={[styles.viewDetailLabel, { color: colors.textSecondary }]}>{t('propertyDetail.equipmentLocation')}</Text>
+                    <Text style={[styles.viewDetailValue, { color: colors.text }]}>{eq.location}</Text>
+                  </View>
+                )}
+                {!eq.category && !eq.brand && !eq.model && !eq.serial_number && !eq.location && (
+                  <Text style={[styles.emptyText, { color: colors.textTertiary }]}>—</Text>
+                )}
+              </View>
+
+              {/* Service Information */}
+              <Text style={[styles.formSectionLabel, { color: colors.text, borderTopColor: colors.borderLight }]}>
+                {t('propertyDetail.serviceInfo')}
+              </Text>
+              <View style={[styles.viewDetailCard, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+                {eq.install_date && (
+                  <View style={styles.viewDetailRow}>
+                    <Text style={[styles.viewDetailLabel, { color: colors.textSecondary }]}>{t('propertyDetail.installDate')}</Text>
+                    <Text style={[styles.viewDetailValue, { color: colors.text }]}>{formatDate(eq.install_date)}</Text>
+                  </View>
+                )}
+                {eq.warranty_expiration && (
+                  <View style={styles.viewDetailRow}>
+                    <Text style={[styles.viewDetailLabel, { color: colors.textSecondary }]}>{t('propertyDetail.warrantyExpiration')}</Text>
+                    <Text style={[styles.viewDetailValue, { color: isWarrantyExpired ? colors.error : colors.text }]}>
+                      {formatDate(eq.warranty_expiration)}{isWarrantyExpired ? ` (${t('propertyDetail.warrantyExpired')})` : ''}
+                    </Text>
+                  </View>
+                )}
+                {eq.last_service_date && (
+                  <View style={styles.viewDetailRow}>
+                    <Text style={[styles.viewDetailLabel, { color: colors.textSecondary }]}>{t('propertyDetail.lastServiceDate')}</Text>
+                    <Text style={[styles.viewDetailValue, { color: colors.text }]}>{formatDate(eq.last_service_date)}</Text>
+                  </View>
+                )}
+                {eq.service_interval_months && (
+                  <View style={styles.viewDetailRow}>
+                    <Text style={[styles.viewDetailLabel, { color: colors.textSecondary }]}>{t('propertyDetail.serviceInterval')}</Text>
+                    <Text style={[styles.viewDetailValue, { color: colors.text }]}>{getIntervalLabel(eq.service_interval_months)}</Text>
+                  </View>
+                )}
+                {!eq.install_date && !eq.warranty_expiration && !eq.last_service_date && !eq.service_interval_months && (
+                  <Text style={[styles.emptyText, { color: colors.textTertiary }]}>{t('propertyDetail.noServiceInfo')}</Text>
+                )}
+              </View>
+
+              {/* Notes */}
+              <Text style={[styles.formSectionLabel, { color: colors.text, borderTopColor: colors.borderLight }]}>
+                {t('propertyDetail.equipmentNotes')}
+              </Text>
+              <View style={[styles.viewDetailCard, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+                <Text style={[eq.notes ? styles.viewDetailValue : styles.emptyText, { color: eq.notes ? colors.text : colors.textTertiary }]}>
+                  {eq.notes || t('propertyDetail.noNotes')}
+                </Text>
+              </View>
+
+              {/* Actions */}
+              <View style={[styles.modalActions, { borderTopColor: colors.border }]}>
+                <Button
+                  title={t('propertyDetail.deleteEquipment')}
+                  onPress={() => {
+                    setEditingEquipment(eq);
+                    setShowDeleteEquipmentConfirm(true);
+                  }}
+                  variant="ghost"
+                  style={{ minWidth: 100, marginRight: 'auto' } as any}
+                  textStyle={{ color: colors.error }}
+                />
+                <Button
+                  title={t('common.edit')}
+                  onPress={openEditFromView}
+                  style={styles.actionButton}
+                />
+              </View>
+            </View>
+          );
+        })()}
+      </Modal>
+
+      {/* Equipment Add/Edit Modal */}
+      <Modal
+        visible={showEquipmentModal}
+        onClose={() => setShowEquipmentModal(false)}
+        title={editingEquipment ? t('propertyDetail.editEquipment') : t('propertyDetail.newEquipment')}
+        size="full"
+      >
+        <View>
+          <Text style={[styles.formSectionLabel, { color: colors.text, borderTopWidth: 0, marginTop: 0 }]}>
+            {t('propertyDetail.equipmentDetails')}
+          </Text>
+
+          <Input
+            label={`${t('propertyDetail.equipmentName')} *`}
+            placeholder={t('propertyDetail.equipmentNamePlaceholder')}
+            value={equipForm.name}
+            onChangeText={(v) => setEquipForm({ ...equipForm, name: v })}
+            error={equipFormErrors.name}
+            leftIcon="build-outline"
+            autoCapitalize="words"
+          />
+
+          <Select
+            label={t('propertyDetail.equipmentCategory')}
+            placeholder={t('propertyDetail.selectCategory')}
+            options={categoryOptions}
+            value={equipForm.category || null}
+            onChange={(value) => setEquipForm({ ...equipForm, category: value })}
+          />
+
+          <View style={styles.row}>
+            <View style={styles.flex1}>
+              <Input
+                label={t('propertyDetail.brand')}
+                placeholder={t('propertyDetail.brand')}
+                value={equipForm.brand}
+                onChangeText={(v) => setEquipForm({ ...equipForm, brand: v })}
+                autoCapitalize="words"
+              />
+            </View>
+            <View style={styles.flex1}>
+              <Input
+                label={t('propertyDetail.model')}
+                placeholder={t('propertyDetail.model')}
+                value={equipForm.model}
+                onChangeText={(v) => setEquipForm({ ...equipForm, model: v })}
+              />
+            </View>
+          </View>
+
+          <Input
+            label={t('propertyDetail.serialNumber')}
+            placeholder={t('propertyDetail.serialNumber')}
+            value={equipForm.serial_number}
+            onChangeText={(v) => setEquipForm({ ...equipForm, serial_number: v })}
+            leftIcon="barcode-outline"
+          />
+
+          <Input
+            label={t('propertyDetail.equipmentLocation')}
+            placeholder={t('propertyDetail.equipmentLocationPlaceholder')}
+            value={equipForm.location}
+            onChangeText={(v) => setEquipForm({ ...equipForm, location: v })}
+            leftIcon="location-outline"
+            autoCapitalize="words"
+          />
+
+          <Select
+            label={t('propertyDetail.condition')}
+            placeholder={t('propertyDetail.selectCondition')}
+            options={conditionOptions}
+            value={equipForm.condition || null}
+            onChange={(value) => setEquipForm({ ...equipForm, condition: value })}
+          />
+
+          <Text style={[styles.formSectionLabel, { color: colors.text, borderTopColor: colors.borderLight }]}>
+            {t('propertyDetail.serviceInfo')}
+          </Text>
+
+          <DatePicker
+            label={t('propertyDetail.installDate')}
+            value={equipForm.install_date}
+            onChange={(date) => setEquipForm({ ...equipForm, install_date: date })}
+            placeholder={t('propertyDetail.installDate')}
+          />
+
+          <DatePicker
+            label={t('propertyDetail.warrantyExpiration')}
+            value={equipForm.warranty_expiration}
+            onChange={(date) => setEquipForm({ ...equipForm, warranty_expiration: date })}
+            placeholder={t('propertyDetail.warrantyExpiration')}
+          />
+
+          <DatePicker
+            label={t('propertyDetail.lastServiceDate')}
+            value={equipForm.last_service_date}
+            onChange={(date) => setEquipForm({ ...equipForm, last_service_date: date })}
+            placeholder={t('propertyDetail.lastServiceDate')}
+          />
+
+          <Select
+            label={t('propertyDetail.serviceInterval')}
+            placeholder={t('propertyDetail.noInterval')}
+            options={intervalOptions}
+            value={equipForm.service_interval_months || null}
+            onChange={(value) => setEquipForm({ ...equipForm, service_interval_months: value })}
+          />
+
+          <Input
+            label={t('propertyDetail.equipmentNotes')}
+            placeholder={t('propertyDetail.equipmentNotesPlaceholder')}
+            value={equipForm.notes}
+            onChangeText={(v) => setEquipForm({ ...equipForm, notes: v })}
+            leftIcon="document-text-outline"
+            multiline
+            numberOfLines={3}
+          />
+        </View>
+
+        <View style={[styles.modalActions, { borderTopColor: colors.border }]}>
+          {editingEquipment && (
+            <Button
+              title={t('propertyDetail.deleteEquipment')}
+              onPress={() => setShowDeleteEquipmentConfirm(true)}
+              variant="ghost"
+              style={{ minWidth: 100, marginRight: 'auto' } as any}
+              textStyle={{ color: colors.error }}
+            />
+          )}
+          <Button
+            title={t('common.cancel')}
+            onPress={() => setShowEquipmentModal(false)}
+            variant="secondary"
+            style={styles.actionButton}
+          />
+          <Button
+            title={t('common.save')}
+            onPress={handleSaveEquipment}
+            loading={equipmentSaving}
+            style={styles.actionButton}
+          />
+        </View>
+      </Modal>
+
+      {/* Delete Equipment Confirm */}
+      <ConfirmDialog
+        visible={showDeleteEquipmentConfirm}
+        title={t('propertyDetail.deleteEquipment')}
+        message={t('propertyDetail.deleteEquipmentConfirm')}
+        confirmLabel={t('common.delete')}
+        cancelLabel={t('common.cancel')}
+        variant="danger"
+        onConfirm={handleDeleteEquipment}
+        onCancel={() => setShowDeleteEquipmentConfirm(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -1110,7 +1727,122 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
 
-  // Linked projects
+  // Equipment section
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  sectionHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  addEquipBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.lg,
+  },
+  addEquipBtnText: {
+    color: '#fff',
+    fontSize: FontSizes.xs,
+    fontWeight: '600',
+  },
+  equipmentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    gap: Spacing.md,
+  },
+  equipmentIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.lg,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  equipmentInfo: {
+    flex: 1,
+  },
+  equipmentName: {
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  equipmentSub: {
+    fontSize: FontSizes.xs,
+  },
+  equipmentRight: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  conditionBadge: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
+  },
+  conditionBadgeText: {
+    fontSize: FontSizes.xs,
+    fontWeight: '600',
+  },
+  equipmentDate: {
+    fontSize: FontSizes.xs,
+  },
+
+  // View equipment modal
+  viewEquipHeader: {
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+  },
+  viewEquipIconLarge: {
+    width: 64,
+    height: 64,
+    borderRadius: BorderRadius.xl,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  viewEquipName: {
+    fontSize: FontSizes.xl,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: Spacing.sm,
+  },
+  viewDetailCard: {
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
+    borderWidth: 1,
+    marginBottom: Spacing.sm,
+  },
+  viewDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+  },
+  viewDetailLabel: {
+    fontSize: FontSizes.sm,
+    flex: 1,
+  },
+  viewDetailValue: {
+    fontSize: FontSizes.sm,
+    fontWeight: '500',
+    textAlign: 'right',
+    flex: 1,
+  },
+  viewDetailValueMono: {
+    fontSize: FontSizes.sm,
+    fontWeight: '500',
+    fontFamily: 'monospace',
+    textAlign: 'right',
+    flex: 1,
+  },
+
+  // Service history / projects
   projectRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1128,9 +1860,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
+    marginTop: 4,
   },
   projectBudget: {
     fontSize: FontSizes.xs,
+  },
+  serviceHistoryRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  serviceAmount: {
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
   },
 
   // Form styles
