@@ -320,7 +320,7 @@ export function DatePicker({
         </TouchableOpacity>
       );
 
-      if ((firstDay + day) % 7 === 0 || day === daysInMonth) {
+      if ((firstDay + day) % 7 === 0) {
         rows.push(
           <View key={`row-${rows.length}`} style={styles.weekRow}>
             {cells}

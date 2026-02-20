@@ -41,7 +41,7 @@ export default function ProjectsScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>(filter || 'all');
 
-  const { data: projects, loading, refreshing, refresh } = useOfflineData<ProjectWithRelations[]>(
+  const { data: projects, loading, refreshing, isOffline, refresh } = useOfflineData<ProjectWithRelations[]>(
     'projects',
     async () => {
       let query = supabase
@@ -545,6 +545,7 @@ export default function ProjectsScreen() {
               }
               actionLabel={!searchQuery ? t('projects.addProject') : undefined}
               onAction={!searchQuery ? openAddModal : undefined}
+              offline={isOffline && !(projects ?? []).length && !searchQuery}
             />
           }
         />

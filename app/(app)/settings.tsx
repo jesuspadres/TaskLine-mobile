@@ -78,6 +78,16 @@ export default function SettingsScreen() {
   );
   const [profileDob, setProfileDob] = useState<Date | null>(null);
 
+  const isUnder13 = useMemo(() => {
+    if (!profileDob) return false;
+    const today = new Date();
+    const age = today.getFullYear() - profileDob.getFullYear();
+    const monthDiff = today.getMonth() - profileDob.getMonth();
+    const dayDiff = today.getDate() - profileDob.getDate();
+    const actualAge = monthDiff < 0 || (monthDiff === 0 && dayDiff < 0) ? age - 1 : age;
+    return actualAge < 13;
+  }, [profileDob]);
+
   // Change email modal state
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [newEmail, setNewEmail] = useState('');
@@ -110,11 +120,13 @@ export default function SettingsScreen() {
         const { data } = await (supabase.rpc as any)('get_storage_info', {
           p_user_id: user.id,
         });
-        if (data) {
+        // RPC may return a single object or an array with one element
+        const row = Array.isArray(data) ? data[0] : data;
+        if (row) {
           setStorageInfo({
-            used_bytes: data.used_bytes || 0,
-            total_bytes: data.total_bytes || 0,
-            file_count: data.file_count || 0,
+            used_bytes: row.used_bytes || 0,
+            total_bytes: row.total_bytes || row.limit_bytes || 0,
+            file_count: row.file_count || 0,
           });
         }
       } catch {
@@ -130,6 +142,7 @@ export default function SettingsScreen() {
     try {
       const url = await createFoundingLockInSession();
       await WebBrowser.openBrowserAsync(url);
+      subscription.refresh();
     } catch (error: any) {
       secureLog.error('Lock-in error:', error.message);
       showToast('error', t('plans.checkoutError'));
@@ -137,6 +150,21 @@ export default function SettingsScreen() {
       setSubCheckoutLoading(false);
     }
   };
+
+  // Build renewal/cancel date string for settings subscription card
+  const subDateLabel = useMemo(() => {
+    if (subscription.isTrialing && subscription.trialEnd) {
+      const d = new Date(subscription.trialEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      return `${t('plans.trialEnds')} ${d}`;
+    }
+    if (subscription.currentPeriodEnd) {
+      const d = new Date(subscription.currentPeriodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      return subscription.cancelAtPeriodEnd
+        ? `${t('plans.cancelsOn')} ${d}`
+        : `${t('plans.renewsOn')} ${d}`;
+    }
+    return null;
+  }, [subscription.currentPeriodEnd, subscription.cancelAtPeriodEnd, subscription.isTrialing, subscription.trialEnd, t]);
 
   const renderSubscriptionCard = () => {
     const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1);
@@ -160,21 +188,11 @@ export default function SettingsScreen() {
           )}
         </View>
 
-        {/* Trial info */}
-        {subscription.isTrialing && subscription.trialEnd && (
-          <View style={settingsStyles.subTrialRow}>
-            <Text style={[settingsStyles.subTrialText, { color: colors.textSecondary }]}>
-              {subscription.daysRemaining} {t('plans.daysRemaining')}
-            </Text>
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={[settingsStyles.subTrialLabel, { color: colors.textTertiary }]}>
-                {t('plans.trialEnds')}
-              </Text>
-              <Text style={[settingsStyles.subTrialDate, { color: colors.text }]}>
-                {new Date(subscription.trialEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-              </Text>
-            </View>
-          </View>
+        {/* Renewal / cancel date */}
+        {subDateLabel && (
+          <Text style={[settingsStyles.subDateLabel, { color: subscription.cancelAtPeriodEnd ? colors.warning : colors.textSecondary }]}>
+            {subDateLabel}
+          </Text>
         )}
 
         {/* Locked-in confirmation */}
@@ -212,13 +230,13 @@ export default function SettingsScreen() {
           </View>
         )}
 
-        {/* Compare Plans button */}
+        {/* Manage Subscription button */}
         <TouchableOpacity
           style={[settingsStyles.subCompareBtn, { borderColor: colors.border }]}
-          onPress={() => router.push('/(app)/plans' as any)}
+          onPress={() => router.push('/(app)/manage-subscription' as any)}
         >
           <Text style={[settingsStyles.subCompareBtnText, { color: colors.text }]}>
-            {t('settings.comparePlans')}
+            {t('settings.manageSubscription')}
           </Text>
         </TouchableOpacity>
       </View>
@@ -816,7 +834,11 @@ export default function SettingsScreen() {
         </TouchableOpacity>
 
         {/* Storage Usage Card */}
-        <View style={[styles.storageCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <TouchableOpacity
+          style={[styles.storageCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          onPress={() => router.push('/(app)/storage-management' as any)}
+          activeOpacity={0.7}
+        >
           <View style={styles.storageHeader}>
             <View style={[styles.iconContainer, { backgroundColor: colors.infoLight }]}>
               <Ionicons name="cloud-outline" size={20} color={colors.primary} />
@@ -829,6 +851,7 @@ export default function SettingsScreen() {
                   : `${plan.features.storage} ${t('settings.storageAvailable')}`}
               </Text>
             </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
           </View>
           <View style={[styles.storageBarBg, { backgroundColor: colors.surfaceSecondary }]}>
             <View
@@ -847,10 +870,10 @@ export default function SettingsScreen() {
           </View>
           {storageInfo && storageInfo.file_count > 0 && (
             <Text style={[styles.storageFiles, { color: colors.textTertiary }]}>
-              {storageInfo.file_count} {t('settings.storageFiles')}
+              {storageInfo.file_count} {t('settings.storageFiles')} · {t('settings.manageStorage')}
             </Text>
           )}
-        </View>
+        </TouchableOpacity>
 
         {/* Settings Sections */}
         {sections.map((section) => (
@@ -1138,6 +1161,11 @@ export default function SettingsScreen() {
                 placeholder={t('auth.dateOfBirthPlaceholder')}
                 maxDate={new Date()}
               />
+              {isUnder13 && (
+                <Text style={{ color: colors.error, fontSize: FontSizes.sm, fontWeight: '500', marginTop: -Spacing.xs }}>
+                  {t('auth.ageRestriction')}
+                </Text>
+              )}
 
               {/* Email (read-only display) */}
               <View style={styles.inputGroup}>
@@ -1163,10 +1191,10 @@ export default function SettingsScreen() {
                 style={[
                   styles.saveButton,
                   { backgroundColor: colors.primary },
-                  profileSaving && styles.saveButtonDisabled,
+                  (profileSaving || isUnder13) && styles.saveButtonDisabled,
                 ]}
                 onPress={handleSaveProfile}
-                disabled={profileSaving}
+                disabled={profileSaving || isUnder13}
               >
                 {profileSaving ? (
                   <ActivityIndicator size="small" color="#fff" />
@@ -1509,6 +1537,10 @@ const settingsStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
+    marginBottom: Spacing.xs,
+  },
+  subDateLabel: {
+    fontSize: FontSizes.sm,
     marginBottom: Spacing.md,
   },
   subPlanName: {
@@ -1523,23 +1555,6 @@ const settingsStyles = StyleSheet.create({
   subBadgeText: {
     color: '#fff',
     fontSize: 10,
-    fontWeight: '700',
-  },
-  subTrialRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Spacing.md,
-  },
-  subTrialText: {
-    fontSize: FontSizes.sm,
-    fontWeight: '600',
-  },
-  subTrialLabel: {
-    fontSize: FontSizes.xs,
-  },
-  subTrialDate: {
-    fontSize: FontSizes.md,
     fontWeight: '700',
   },
   subLockedIn: {

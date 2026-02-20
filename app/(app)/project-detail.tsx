@@ -71,7 +71,7 @@ export default function ProjectDetailScreen() {
   const [aiTasksAdded, setAiTasksAdded] = useState(false);
 
   // --- Offline Data ---
-  const { data: projectData, loading, refreshing, refresh } = useOfflineData<ProjectDetailData>(
+  const { data: projectData, loading, refreshing, isOffline, refresh } = useOfflineData<ProjectDetailData>(
     `project_detail:${id}`,
     async () => {
       // Fetch project
@@ -910,6 +910,7 @@ export default function ProjectDetailScreen() {
           icon="folder-outline"
           title={t('projectDetail.notFound')}
           description={t('projectDetail.notFoundDesc')}
+          offline={isOffline}
         />
       </SafeAreaView>
     );
@@ -1509,7 +1510,7 @@ export default function ProjectDetailScreen() {
                       key={option.key}
                       style={[
                         styles.statusPickerOption,
-                        isActive && { backgroundColor: colors.primaryLight || colors.infoLight },
+                        isActive && { backgroundColor: `${colors.primary}14` },
                       ]}
                       onPress={() => handleQuickStageChange(option.key as ProjectStage)}
                       activeOpacity={0.7}

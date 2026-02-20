@@ -39,7 +39,7 @@ export default function ClientsScreen() {
   const [filterOnboarded, setFilterOnboarded] = useState<string>('all');
   const [sortBy, setSortBy] = useState<SortKey>('newest');
 
-  const { data: clients, loading, refreshing, refresh } = useOfflineData<Client[]>(
+  const { data: clients, loading, refreshing, isOffline, refresh } = useOfflineData<Client[]>(
     'clients',
     async () => {
       let query = supabase
@@ -458,6 +458,7 @@ export default function ClientsScreen() {
             }
             actionLabel={!searchQuery ? t('clients.addClient') : undefined}
             onAction={!searchQuery ? openAddModal : undefined}
+            offline={isOffline && !(clients ?? []).length && !searchQuery}
           />
         }
       />

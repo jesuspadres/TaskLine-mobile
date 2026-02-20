@@ -12,11 +12,15 @@ import {
   Modal as RNModal,
   KeyboardAvoidingView,
   Platform,
+  Image,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { cacheDirectory, downloadAsync } from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import { supabase } from '@/lib/supabase';
 import { secureLog } from '@/lib/security';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
@@ -44,6 +48,7 @@ interface RequestData {
   timeline: string | null;
   status: string;
   files: string[] | null;
+  media_url: string | null;
   address_formatted: string | null;
   address_lat: number | null;
   address_lng: number | null;
@@ -98,7 +103,7 @@ export default function RequestDetailScreen() {
     archived: { bg: colors.surfaceSecondary, text: colors.textTertiary },
   }), [colors]);
 
-  const { data: requestData, loading, refreshing, refresh } = useOfflineData<RequestDetailData>(
+  const { data: requestData, loading, refreshing, isOffline, refresh } = useOfflineData<RequestDetailData>(
     `request_detail:${id}`,
     async () => {
       // Fetch request
@@ -197,6 +202,8 @@ export default function RequestDetailScreen() {
   const [aiResponding, setAiResponding] = useState(false);
   const [showFollowUpModal, setShowFollowUpModal] = useState(false);
   const [followUpDraft, setFollowUpDraft] = useState('');
+  const [previewImageIndex, setPreviewImageIndex] = useState<number | null>(null);
+  const [savingImage, setSavingImage] = useState(false);
 
   // Sync matchedProperty from requestData into local state so save-property can update it
   useEffect(() => {
@@ -463,6 +470,28 @@ export default function RequestDetailScreen() {
   };
 
   // ================================================================
+  // IMAGE ZOOM & SHARE
+  // ================================================================
+  const mediaUrls = request?.media_url ? request.media_url.split(',').filter(Boolean).map(u => u.trim()) : [];
+
+  const handleShareImage = async () => {
+    if (previewImageIndex === null || !mediaUrls[previewImageIndex]) return;
+    setSavingImage(true);
+    try {
+      const url = mediaUrls[previewImageIndex];
+      const filename = url.split('/').pop()?.split('?')[0] || 'image.jpg';
+      const localUri = cacheDirectory + filename;
+      const { uri } = await downloadAsync(url, localUri);
+      await Sharing.shareAsync(uri);
+    } catch (error) {
+      secureLog.error('Error sharing image:', error);
+      showToast('error', t('common.error'));
+    } finally {
+      setSavingImage(false);
+    }
+  };
+
+  // ================================================================
   // LOADING / NOT FOUND
   // ================================================================
   if (loading) {
@@ -490,7 +519,7 @@ export default function RequestDetailScreen() {
           <Text style={[styles.headerTitle, { color: colors.text }]}>{t('requestDetail.title')}</Text>
           <View style={styles.headerSpacer} />
         </View>
-        <EmptyState icon="mail-outline" title={t('requestDetail.notFound')} description={t('requestDetail.notFoundDesc')} />
+        <EmptyState icon="mail-outline" title={t('requestDetail.notFound')} description={t('requestDetail.notFoundDesc')} offline={isOffline} />
       </SafeAreaView>
     );
   }
@@ -541,6 +570,30 @@ export default function RequestDetailScreen() {
             <Text style={[styles.descriptionText, { color: colors.textSecondary }]}>{desc}</Text>
           </View>
         ) : null}
+
+        {/* Attached Media */}
+        {mediaUrls.length > 0 && (
+          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="images-outline" size={18} color={colors.text} />
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                {t('requestDetail.attachedMedia')} ({mediaUrls.length})
+              </Text>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mediaCarousel}>
+              {mediaUrls.map((url, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={[styles.mediaThumbnail, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}
+                  onPress={() => setPreviewImageIndex(index)}
+                  activeOpacity={0.8}
+                >
+                  <Image source={{ uri: url }} style={styles.mediaThumbnailImage} resizeMode="cover" />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
 
         {/* Client Info Card */}
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -1017,6 +1070,67 @@ export default function RequestDetailScreen() {
         onConfirm={handleStatusUpdate}
         onCancel={() => setConfirmVisible(false)}
       />
+
+      {/* Image Preview Modal — pinch-to-zoom (iOS) + share/download */}
+      {previewImageIndex !== null && mediaUrls.length > 0 && (
+        <RNModal visible transparent animationType="fade" onRequestClose={() => setPreviewImageIndex(null)}>
+          <View style={styles.previewOverlay}>
+            {/* Top bar: share / counter / close */}
+            <View style={styles.previewTopBar}>
+              <TouchableOpacity style={styles.previewTopBtn} onPress={handleShareImage} disabled={savingImage}>
+                {savingImage ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Ionicons name="share-outline" size={22} color="#fff" />
+                )}
+              </TouchableOpacity>
+              <Text style={styles.previewCounter}>
+                {previewImageIndex + 1} / {mediaUrls.length}
+              </Text>
+              <TouchableOpacity style={styles.previewTopBtn} onPress={() => setPreviewImageIndex(null)}>
+                <Ionicons name="close" size={26} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Zoomable image — ScrollView with pinch-to-zoom */}
+            <ScrollView
+              key={previewImageIndex}
+              maximumZoomScale={5}
+              minimumZoomScale={1}
+              centerContent
+              showsHorizontalScrollIndicator={false}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.previewScrollContent}
+              style={styles.previewScrollView}
+              bouncesZoom
+            >
+              <Image
+                source={{ uri: mediaUrls[previewImageIndex] }}
+                style={styles.previewImage}
+                resizeMode="contain"
+              />
+            </ScrollView>
+
+            {/* Navigation arrows */}
+            {mediaUrls.length > 1 && (
+              <>
+                <TouchableOpacity
+                  style={[styles.previewNav, styles.previewNavLeft]}
+                  onPress={() => setPreviewImageIndex(previewImageIndex === 0 ? mediaUrls.length - 1 : previewImageIndex - 1)}
+                >
+                  <Ionicons name="chevron-back" size={32} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.previewNav, styles.previewNavRight]}
+                  onPress={() => setPreviewImageIndex(previewImageIndex === mediaUrls.length - 1 ? 0 : previewImageIndex + 1)}
+                >
+                  <Ionicons name="chevron-forward" size={32} color="#fff" />
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </RNModal>
+      )}
     </SafeAreaView>
   );
 }
@@ -1136,6 +1250,59 @@ const styles = StyleSheet.create({
 
   // Description
   descriptionText: { fontSize: FontSizes.sm, lineHeight: 22 },
+
+  // Media
+  mediaCarousel: {
+    gap: Spacing.sm,
+  },
+  mediaThumbnail: {
+    width: 100,
+    height: 100,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  mediaThumbnailImage: { width: '100%', height: '100%' },
+  previewOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.95)',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  previewTopBar: {
+    position: 'absolute', top: 50, left: 16, right: 16, zIndex: 10,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  },
+  previewTopBtn: {
+    width: 44, height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  previewCounter: {
+    color: '#fff', fontSize: FontSizes.sm, fontWeight: '600',
+    backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 12, paddingVertical: 4,
+    borderRadius: BorderRadius.full, overflow: 'hidden',
+  },
+  previewScrollView: {
+    flex: 1,
+    marginTop: 100,
+    marginBottom: 50,
+  },
+  previewScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  previewImage: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height * 0.65,
+  },
+  previewNav: {
+    position: 'absolute', top: '45%', zIndex: 10,
+    padding: Spacing.md, borderRadius: BorderRadius.full,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  previewNavLeft: { left: 12 },
+  previewNavRight: { right: 12 },
 
   // Action buttons
   actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },

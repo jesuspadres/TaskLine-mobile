@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
+import { useTranslations } from '@/hooks/useTranslations';
 import { Button } from './Button';
 
 interface EmptyStateProps {
@@ -13,6 +14,8 @@ interface EmptyStateProps {
   actionLabel?: string;
   onAction?: () => void;
   style?: ViewStyle;
+  /** When true, overrides icon/title/description with an offline message */
+  offline?: boolean;
 }
 
 export function EmptyState({
@@ -23,24 +26,32 @@ export function EmptyState({
   actionLabel,
   onAction,
   style,
+  offline,
 }: EmptyStateProps) {
   const { colors } = useTheme();
+  const { t } = useTranslations();
 
-  // Support both "message" and "description" props for compatibility
-  const displayMessage = message || description;
+  const displayIcon = offline ? 'cloud-offline-outline' : icon;
+  const displayTitle = offline ? t('common.offlineTitle') : title;
+  const displayMessage = offline
+    ? t('common.offlineDescription')
+    : message || description;
+
+  // Hide action button when offline (can't do anything)
+  const showAction = !offline && actionLabel && onAction;
 
   return (
     <View style={[styles.container, style]}>
-      <View style={[styles.iconContainer, { backgroundColor: colors.surfaceSecondary }]}>
-        <Ionicons name={icon} size={48} color={colors.textTertiary} />
+      <View style={[styles.iconContainer, { backgroundColor: offline ? colors.warningLight : colors.surfaceSecondary }]}>
+        <Ionicons name={displayIcon} size={48} color={offline ? colors.warning : colors.textTertiary} />
       </View>
-      <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
+      <Text style={[styles.title, { color: colors.text }]}>{displayTitle}</Text>
       {displayMessage && (
         <Text style={[styles.description, { color: colors.textSecondary }]}>
           {displayMessage}
         </Text>
       )}
-      {actionLabel && onAction && (
+      {showAction && (
         <Button
           title={actionLabel}
           onPress={onAction}

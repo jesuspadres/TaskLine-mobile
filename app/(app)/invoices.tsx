@@ -91,7 +91,7 @@ export default function InvoicesScreen() {
   const haptics = useHaptics();
   const { filterContainerStyle, onFilterLayout, onScroll, filterHeight } = useCollapsibleFilters();
 
-  const { data: invoices, loading, refreshing, refresh } = useOfflineData<InvoiceRow[]>(
+  const { data: invoices, loading, refreshing, isOffline, refresh } = useOfflineData<InvoiceRow[]>(
     'invoices',
     async () => {
       const { data, error } = await supabase
@@ -1340,7 +1340,13 @@ export default function InvoicesScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={refresh} />
           }
           ListEmptyComponent={
-            searchQuery || filterStatus !== 'all' ? (
+            isOffline && !(invoices ?? []).length && !searchQuery ? (
+              <EmptyState
+                icon="document-text-outline"
+                title={t('invoices.noInvoices')}
+                offline
+              />
+            ) : searchQuery || filterStatus !== 'all' ? (
               <EmptyState
                 icon="search-outline"
                 title={t('invoices.noResults')}

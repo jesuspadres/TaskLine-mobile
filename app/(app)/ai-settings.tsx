@@ -37,23 +37,56 @@ const DEFAULT_SETTINGS: AiSettings = {
   custom_instructions: '',
 };
 
+// Purple accent for AI features (matches web)
+const PURPLE = {
+  base: '#7c3aed',
+  light: '#ede9fe',
+  lightDark: '#2d1f5e',
+  border: '#c4b5fd',
+  borderDark: '#6d28d9',
+  text: '#6d28d9',
+  textDark: '#a78bfa',
+};
+
 export default function AiSettingsScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const { t } = useTranslations();
-  const { tier } = useSubscription();
+  const subscription = useSubscription();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<AiSettings>(DEFAULT_SETTINGS);
 
-  const isPaidTier = tier !== 'free';
+  const canUseAi = subscription.isPlus || subscription.isBusiness;
+
+  const purple = useMemo(() => ({
+    bg: isDark ? PURPLE.lightDark : PURPLE.light,
+    border: isDark ? PURPLE.borderDark : PURPLE.border,
+    text: isDark ? PURPLE.textDark : PURPLE.text,
+    base: PURPLE.base,
+  }), [isDark]);
 
   const automationModes = useMemo(() => [
-    { value: 'off' as AutomationMode, label: t('aiSettings.modeOff'), desc: t('aiSettings.modeOffDesc'), icon: 'close-circle-outline' },
-    { value: 'advise' as AutomationMode, label: t('aiSettings.modeAdvise'), desc: t('aiSettings.modeAdviseDesc'), icon: 'bulb-outline' },
-    { value: 'auto_create' as AutomationMode, label: t('aiSettings.modeAutoCreate'), desc: t('aiSettings.modeAutoCreateDesc'), icon: 'sparkles-outline' },
+    {
+      value: 'off' as AutomationMode,
+      label: t('aiSettings.modeOff'),
+      desc: t('aiSettings.modeOffDesc'),
+      icon: 'hand-left-outline' as const,
+    },
+    {
+      value: 'advise' as AutomationMode,
+      label: t('aiSettings.modeAdvise'),
+      desc: t('aiSettings.modeAdviseDesc'),
+      icon: 'bulb-outline' as const,
+    },
+    {
+      value: 'auto_create' as AutomationMode,
+      label: t('aiSettings.modeAutoCreate'),
+      desc: t('aiSettings.modeAutoCreateDesc'),
+      icon: 'sparkles-outline' as const,
+    },
   ], [t]);
 
   const fetchSettings = useCallback(async () => {
@@ -72,7 +105,7 @@ export default function AiSettingsScreen() {
         });
       }
     } catch {
-      // Column may not exist yet
+      // Table may not exist yet
     } finally {
       setLoading(false);
     }
@@ -115,7 +148,7 @@ export default function AiSettingsScreen() {
           <View style={styles.headerSpacer} />
         </View>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <ActivityIndicator size="large" color={purple.base} />
         </View>
       </SafeAreaView>
     );
@@ -132,123 +165,128 @@ export default function AiSettingsScreen() {
       </View>
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-        {!isPaidTier && (
-          <View style={[styles.upgradeCard, { backgroundColor: colors.warningLight, borderColor: colors.warning }]}>
-            <Ionicons name="lock-closed" size={20} color={colors.warning} />
-            <View style={styles.upgradeCardContent}>
-              <Text style={[styles.upgradeTitle, { color: colors.text }]}>{t('aiSettings.proRequired')}</Text>
-              <Text style={[styles.upgradeSubtitle, { color: colors.textSecondary }]}>{t('aiSettings.proRequiredSubtitle')}</Text>
+        {!canUseAi && (
+          <View style={[styles.upgradeCard, { backgroundColor: purple.bg, borderColor: purple.border }]}>
+            <View style={[styles.upgradeIconWrap, { backgroundColor: purple.bg }]}>
+              <Ionicons name="lock-closed" size={24} color={purple.text} />
             </View>
+            <Text style={[styles.upgradeTitle, { color: colors.text }]}>{t('aiSettings.plusRequired')}</Text>
+            <Text style={[styles.upgradeSubtitle, { color: colors.textSecondary }]}>{t('aiSettings.plusRequiredSubtitle')}</Text>
             <TouchableOpacity
-              style={[styles.upgradeBtn, { backgroundColor: colors.primary }]}
+              style={[styles.upgradeBtn, { backgroundColor: purple.base }]}
               onPress={() => router.push('/(app)/plans' as any)}
             >
-              <Text style={styles.upgradeBtnText}>{t('smsSettings.upgrade')}</Text>
+              <Text style={styles.upgradeBtnText}>{t('aiSettings.upgrade')}</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Description */}
-        <View style={[styles.descCard, { backgroundColor: colors.infoLight }]}>
-          <Ionicons name="sparkles" size={24} color={colors.primary} />
-          <Text style={[styles.descText, { color: colors.text }]}>{t('aiSettings.description')}</Text>
+        {/* Header card with sparkle icon */}
+        <View style={[styles.headerCard, { backgroundColor: purple.bg }]}>
+          <View style={[styles.headerIconWrap, { backgroundColor: isDark ? purple.border + '30' : '#f3e8ff' }]}>
+            <Ionicons name="sparkles" size={20} color={purple.text} />
+          </View>
+          <View style={styles.headerCardContent}>
+            <Text style={[styles.headerCardTitle, { color: colors.text }]}>{t('aiSettings.title')}</Text>
+            <Text style={[styles.headerCardSubtitle, { color: colors.textSecondary }]}>{t('aiSettings.description')}</Text>
+          </View>
         </View>
 
         {/* Master Toggle */}
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <View style={styles.toggleRow}>
-            <View style={styles.toggleContent}>
-              <Text style={[styles.toggleLabel, { color: colors.text }]}>{t('aiSettings.enableAi')}</Text>
-              <Text style={[styles.toggleSubtitle, { color: colors.textSecondary }]}>{t('aiSettings.enableAiDesc')}</Text>
-            </View>
-            <Switch
-              value={settings.ai_enabled}
-              onValueChange={(v) => updateField('ai_enabled', v)}
-              trackColor={{ false: colors.border, true: colors.primary + '60' }}
-              thumbColor={settings.ai_enabled ? colors.primary : colors.surface}
-              disabled={!isPaidTier}
-            />
+        <View style={[styles.toggleCard, { backgroundColor: isDark ? colors.surface : '#f9fafb', borderColor: colors.border }]}>
+          <View style={styles.toggleContent}>
+            <Text style={[styles.toggleLabel, { color: colors.text }]}>{t('aiSettings.enableAi')}</Text>
+            <Text style={[styles.toggleSubtitle, { color: colors.textSecondary }]}>{t('aiSettings.enableAiDesc')}</Text>
           </View>
-        </View>
-
-        {/* Automation Mode */}
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <View style={styles.cardHeader}>
-            <Ionicons name="settings-outline" size={18} color={colors.primary} />
-            <Text style={[styles.cardTitle, { color: colors.text }]}>{t('aiSettings.automationMode')}</Text>
-          </View>
-
-          {automationModes.map((mode) => (
-            <TouchableOpacity
-              key={mode.value}
-              style={[
-                styles.modeOption,
-                { borderColor: settings.automation_mode === mode.value ? colors.primary : colors.border },
-                settings.automation_mode === mode.value && { backgroundColor: colors.primary + '10' },
-              ]}
-              onPress={() => updateField('automation_mode', mode.value)}
-              disabled={!isPaidTier || !settings.ai_enabled}
-            >
-              <Ionicons
-                name={mode.icon as any}
-                size={20}
-                color={settings.automation_mode === mode.value ? colors.primary : colors.textTertiary}
-              />
-              <View style={styles.modeContent}>
-                <Text style={[styles.modeLabel, { color: settings.automation_mode === mode.value ? colors.primary : colors.text }]}>
-                  {mode.label}
-                </Text>
-                <Text style={[styles.modeDesc, { color: colors.textSecondary }]}>{mode.desc}</Text>
-              </View>
-              {settings.automation_mode === mode.value && (
-                <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
-              )}
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Auto-Respond */}
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <View style={styles.toggleRow}>
-            <View style={styles.toggleContent}>
-              <Text style={[styles.toggleLabel, { color: colors.text }]}>{t('aiSettings.autoRespond')}</Text>
-              <Text style={[styles.toggleSubtitle, { color: colors.textSecondary }]}>{t('aiSettings.autoRespondDesc')}</Text>
-            </View>
-            <Switch
-              value={settings.auto_respond}
-              onValueChange={(v) => updateField('auto_respond', v)}
-              trackColor={{ false: colors.border, true: colors.primary + '60' }}
-              thumbColor={settings.auto_respond ? colors.primary : colors.surface}
-              disabled={!isPaidTier || !settings.ai_enabled}
-            />
-          </View>
-        </View>
-
-        {/* Custom Instructions */}
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <View style={styles.cardHeader}>
-            <Ionicons name="document-text-outline" size={18} color={colors.primary} />
-            <Text style={[styles.cardTitle, { color: colors.text }]}>{t('aiSettings.customInstructions')}</Text>
-          </View>
-          <Text style={[styles.fieldHint, { color: colors.textSecondary }]}>{t('aiSettings.customInstructionsDesc')}</Text>
-          <TextInput
-            style={[styles.instructionsInput, { backgroundColor: colors.background, borderColor: colors.border, color: colors.text }]}
-            value={settings.custom_instructions}
-            onChangeText={(v) => updateField('custom_instructions', v)}
-            placeholder={t('aiSettings.customInstructionsPlaceholder')}
-            placeholderTextColor={colors.textTertiary}
-            multiline
-            numberOfLines={5}
-            textAlignVertical="top"
-            editable={isPaidTier && settings.ai_enabled}
+          <Switch
+            value={settings.ai_enabled}
+            onValueChange={(v) => updateField('ai_enabled', v)}
+            trackColor={{ false: colors.border, true: purple.base + '60' }}
+            thumbColor={settings.ai_enabled ? purple.base : colors.surface}
+            disabled={!canUseAi}
           />
         </View>
 
+        {settings.ai_enabled && (
+          <>
+            {/* Automation Mode */}
+            <View style={styles.section}>
+              <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>{t('aiSettings.automationMode')}</Text>
+              <View style={styles.modeList}>
+                {automationModes.map((mode) => {
+                  const isSelected = settings.automation_mode === mode.value;
+                  return (
+                    <TouchableOpacity
+                      key={mode.value}
+                      style={[
+                        styles.modeOption,
+                        {
+                          borderColor: isSelected ? purple.border : colors.border,
+                          backgroundColor: isSelected ? purple.bg : colors.surface,
+                        },
+                      ]}
+                      onPress={() => updateField('automation_mode', mode.value)}
+                      disabled={!canUseAi}
+                      activeOpacity={0.7}
+                    >
+                      {/* Radio indicator */}
+                      <View style={[
+                        styles.radio,
+                        { borderColor: isSelected ? purple.base : colors.textTertiary },
+                      ]}>
+                        {isSelected && <View style={[styles.radioInner, { backgroundColor: purple.base }]} />}
+                      </View>
+                      <View style={styles.modeContent}>
+                        <Text style={[styles.modeLabel, { color: isSelected ? purple.text : colors.text }]}>
+                          {mode.label}
+                        </Text>
+                        <Text style={[styles.modeDesc, { color: colors.textSecondary }]}>{mode.desc}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            {/* Auto-Respond Toggle */}
+            <View style={[styles.toggleCard, { backgroundColor: isDark ? colors.surface : '#f9fafb', borderColor: colors.border }]}>
+              <View style={styles.toggleContent}>
+                <Text style={[styles.toggleLabel, { color: colors.text }]}>{t('aiSettings.autoRespond')}</Text>
+                <Text style={[styles.toggleSubtitle, { color: colors.textSecondary }]}>{t('aiSettings.autoRespondDesc')}</Text>
+              </View>
+              <Switch
+                value={settings.auto_respond}
+                onValueChange={(v) => updateField('auto_respond', v)}
+                trackColor={{ false: colors.border, true: purple.base + '60' }}
+                thumbColor={settings.auto_respond ? purple.base : colors.surface}
+                disabled={!canUseAi}
+              />
+            </View>
+
+            {/* Custom Instructions */}
+            <View style={styles.section}>
+              <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>{t('aiSettings.customInstructions')}</Text>
+              <TextInput
+                style={[styles.instructionsInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+                value={settings.custom_instructions}
+                onChangeText={(v) => updateField('custom_instructions', v)}
+                placeholder={t('aiSettings.customInstructionsPlaceholder')}
+                placeholderTextColor={colors.textTertiary}
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+                editable={canUseAi}
+              />
+              <Text style={[styles.fieldHint, { color: colors.textTertiary }]}>{t('aiSettings.customInstructionsDesc')}</Text>
+            </View>
+          </>
+        )}
+
         {/* Save Button */}
         <TouchableOpacity
-          style={[styles.saveButton, { backgroundColor: colors.primary }, saving && styles.saveDisabled]}
+          style={[styles.saveButton, { backgroundColor: purple.base }, saving && styles.saveDisabled]}
           onPress={handleSave}
-          disabled={saving || !isPaidTier}
+          disabled={saving || !canUseAi}
         >
           {saving ? (
             <ActivityIndicator size="small" color="#fff" />
@@ -272,49 +310,76 @@ const styles = StyleSheet.create({
   headerSpacer: { width: 40 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scrollView: { flex: 1 },
-  scrollContent: { padding: Spacing.lg, paddingBottom: Spacing['4xl'] },
+  scrollContent: { padding: Spacing.lg, paddingBottom: Spacing['4xl'], gap: Spacing.lg },
 
+  // Upgrade card (centered, matches web locked state)
   upgradeCard: {
-    flexDirection: 'row', alignItems: 'center', padding: Spacing.md,
-    borderRadius: BorderRadius.xl, borderWidth: 1, marginBottom: Spacing.lg, gap: Spacing.md,
+    alignItems: 'center', padding: Spacing.xl,
+    borderRadius: BorderRadius.xl, borderWidth: 1,
   },
-  upgradeCardContent: { flex: 1 },
-  upgradeTitle: { fontSize: FontSizes.sm, fontWeight: '700' },
-  upgradeSubtitle: { fontSize: FontSizes.xs, lineHeight: 16 },
-  upgradeBtn: { paddingVertical: Spacing.sm, paddingHorizontal: Spacing.md, borderRadius: BorderRadius.lg },
+  upgradeIconWrap: {
+    width: 48, height: 48, borderRadius: 24,
+    justifyContent: 'center', alignItems: 'center', marginBottom: Spacing.md,
+  },
+  upgradeTitle: { fontSize: FontSizes.lg, fontWeight: '700', marginBottom: 4, textAlign: 'center' },
+  upgradeSubtitle: { fontSize: FontSizes.sm, textAlign: 'center', marginBottom: Spacing.lg, lineHeight: 20 },
+  upgradeBtn: { paddingVertical: Spacing.sm + 2, paddingHorizontal: Spacing.xl, borderRadius: BorderRadius.lg },
   upgradeBtnText: { color: '#fff', fontSize: FontSizes.sm, fontWeight: '700' },
 
-  descCard: {
+  // Header card with icon + title + subtitle (matches web card header)
+  headerCard: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
-    padding: Spacing.lg, borderRadius: BorderRadius.xl, marginBottom: Spacing.lg,
+    padding: Spacing.lg, borderRadius: BorderRadius.xl,
   },
-  descText: { flex: 1, fontSize: FontSizes.sm, lineHeight: 20 },
+  headerIconWrap: {
+    width: 40, height: 40, borderRadius: BorderRadius.lg,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  headerCardContent: { flex: 1 },
+  headerCardTitle: { fontSize: FontSizes.lg, fontWeight: '700' },
+  headerCardSubtitle: { fontSize: FontSizes.xs, lineHeight: 18, marginTop: 2 },
 
-  card: { borderRadius: BorderRadius.xl, borderWidth: 1, padding: Spacing.lg, marginBottom: Spacing.lg },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.md },
-  cardTitle: { fontSize: FontSizes.md, fontWeight: '600' },
-
-  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  // Toggle cards (master toggle + auto-respond)
+  toggleCard: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    padding: Spacing.lg, borderRadius: BorderRadius.xl, borderWidth: 1,
+  },
   toggleContent: { flex: 1, marginRight: Spacing.md },
   toggleLabel: { fontSize: FontSizes.md, fontWeight: '500' },
   toggleSubtitle: { fontSize: FontSizes.xs, marginTop: 2, lineHeight: 16 },
 
+  // Section with label
+  section: { gap: Spacing.sm },
+  sectionLabel: { fontSize: FontSizes.sm, fontWeight: '600' },
+
+  // Automation mode radio options
+  modeList: { gap: Spacing.sm },
   modeOption: {
-    flexDirection: 'row', alignItems: 'center',
-    borderWidth: 1, borderRadius: BorderRadius.lg,
-    padding: Spacing.md, marginBottom: Spacing.sm, gap: Spacing.md,
+    flexDirection: 'row', alignItems: 'flex-start',
+    borderWidth: 1, borderRadius: BorderRadius.xl,
+    padding: Spacing.md, gap: Spacing.md,
+  },
+  radio: {
+    width: 20, height: 20, borderRadius: 10,
+    borderWidth: 2, marginTop: 2,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  radioInner: {
+    width: 10, height: 10, borderRadius: 5,
   },
   modeContent: { flex: 1 },
   modeLabel: { fontSize: FontSizes.sm, fontWeight: '600' },
   modeDesc: { fontSize: FontSizes.xs, marginTop: 2, lineHeight: 16 },
 
-  fieldHint: { fontSize: FontSizes.xs, lineHeight: 16, marginBottom: Spacing.sm },
+  // Custom instructions
   instructionsInput: {
-    borderWidth: 1, borderRadius: BorderRadius.lg,
+    borderWidth: 1, borderRadius: BorderRadius.xl,
     padding: Spacing.md, fontSize: FontSizes.sm,
-    minHeight: 120,
+    minHeight: 100,
   },
+  fieldHint: { fontSize: FontSizes.xs, lineHeight: 16 },
 
+  // Save button
   saveButton: { paddingVertical: Spacing.lg, borderRadius: BorderRadius.lg, alignItems: 'center', justifyContent: 'center', minHeight: 52 },
   saveDisabled: { opacity: 0.7 },
   saveButtonText: { color: '#fff', fontSize: FontSizes.md, fontWeight: '600' },

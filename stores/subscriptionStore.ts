@@ -11,6 +11,7 @@ interface SubscriptionState {
   billingPeriod: 'monthly' | 'annual' | null;
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
+  cancelAt: string | null;
   loading: boolean;
   initialized: boolean;
   isFree: boolean;
@@ -23,11 +24,13 @@ interface SubscriptionState {
   isFoundingMember: boolean;
   foundingSpotNumber: number | null;
   cardEntered: boolean;
+  isTrialEligible: boolean;
 }
 
 interface SubscriptionStore extends SubscriptionState {
   initialize: (userId: string) => Promise<void>;
   fetchSubscription: (userId: string) => Promise<void>;
+  updateOptimistic: (partial: Partial<SubscriptionState>) => void;
   clear: () => void;
 }
 
@@ -54,6 +57,7 @@ const DEFAULT_STATE: SubscriptionState = {
   billingPeriod: null,
   currentPeriodEnd: null,
   cancelAtPeriodEnd: false,
+  cancelAt: null,
   loading: true,
   initialized: false,
   isFree: true,
@@ -66,6 +70,7 @@ const DEFAULT_STATE: SubscriptionState = {
   isFoundingMember: false,
   foundingSpotNumber: null,
   cardEntered: false,
+  isTrialEligible: false,
 };
 
 // Persist subscription state to SecureStore
@@ -79,6 +84,7 @@ async function saveToCache(state: SubscriptionState): Promise<void> {
         billingPeriod: state.billingPeriod,
         currentPeriodEnd: state.currentPeriodEnd,
         cancelAtPeriodEnd: state.cancelAtPeriodEnd,
+        cancelAt: state.cancelAt,
         isTrialing: state.isTrialing,
         trialEnd: state.trialEnd,
         isFoundingMember: state.isFoundingMember,
@@ -139,11 +145,14 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
 
     try {
       // 1. Primary: Check the subscriptions table (Stripe-managed)
+      // NOTE: 'canceled' is excluded — a fully canceled subscription should not
+      // grant tier access. When cancel_at_period_end=true, Stripe keeps status
+      // as 'active' until the period ends, so active subs are still found.
       const { data: subscription } = await (supabase
         .from('subscriptions') as any)
         .select('*')
         .eq('user_id', userId)
-        .in('status', ['active', 'trialing', 'past_due', 'canceled'])
+        .in('status', ['active', 'trialing', 'past_due'])
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
@@ -161,10 +170,19 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
         // founding_members table might not exist or user isn't a founding member
       }
 
+      // 2b. Check trial eligibility: no previous subscriptions and not a founding member
+      const { count: prevSubCount } = await (supabase
+        .from('subscriptions') as any)
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId);
+
+      const isTrialEligible = (prevSubCount ?? 0) === 0 && !foundingMember;
+
       const foundingInfo = {
         isFoundingMember: !!foundingMember,
         foundingSpotNumber: foundingMember?.spot_number || null,
         cardEntered: !!foundingMember?.card_entered_at,
+        isTrialEligible,
       };
 
       if (subscription?.tier_slug) {
@@ -172,13 +190,16 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
         const billingInterval = subscription.billing_interval;
         const isTrialing = subscription.status === 'trialing';
         const trialEnd = subscription.trial_end || foundingMember?.trial_ends_at || null;
+        // cancel_at_period_end OR cancel_at means the subscription is scheduled to cancel
+        const willCancel = subscription.cancel_at_period_end || !!subscription.cancel_at;
 
         const newState: SubscriptionState = {
           tier: tierSlug,
           status: subscription.status || 'none',
           billingPeriod: billingInterval === 'year' ? 'annual' : billingInterval === 'month' ? 'monthly' : null,
           currentPeriodEnd: subscription.current_period_end || null,
-          cancelAtPeriodEnd: subscription.cancel_at_period_end || false,
+          cancelAtPeriodEnd: willCancel,
+          cancelAt: subscription.cancel_at || null,
           loading: false,
           initialized: true,
           ...makeTierState(tierSlug),
@@ -208,6 +229,7 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
           billingPeriod: null,
           currentPeriodEnd: null,
           cancelAtPeriodEnd: false,
+          cancelAt: null,
           loading: false,
           initialized: true,
           ...makeTierState(tierSlug),
@@ -233,6 +255,7 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
           billingPeriod: null,
           currentPeriodEnd: null,
           cancelAtPeriodEnd: false,
+          cancelAt: null,
           loading: false,
           initialized: true,
           ...makeTierState(isExpired ? 'free' : 'plus'),
@@ -258,6 +281,14 @@ export const useSubscriptionStore = create<SubscriptionStore>((set, get) => ({
     } catch {
       set((prev) => ({ ...prev, loading: false, initialized: true }));
     }
+  },
+
+  updateOptimistic: (partial: Partial<SubscriptionState>) => {
+    set((prev) => {
+      const updated = { ...prev, ...partial };
+      saveToCache(updated);
+      return updated;
+    });
   },
 
   clear: () => {

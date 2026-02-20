@@ -16,6 +16,7 @@ import { useCollapsibleFilters } from '@/hooks/useCollapsibleFilters';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useTranslations } from '@/hooks/useTranslations';
 import { FilterChips, EmptyState, ConfirmDialog, showToast } from '@/components';
+import { useOfflineStore } from '@/stores/offlineStore';
 import { Spacing, FontSizes, BorderRadius, Shadows } from '@/constants/theme';
 
 function getNotificationIcon(type: string): keyof typeof Ionicons.glyphMap {
@@ -255,6 +256,7 @@ export default function NotificationsScreen() {
     archiveNotification,
     archiveAllRead,
   } = useNotifications();
+  const isOffline = useOfflineStore((s) => !s.isOnline);
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [refreshing, setRefreshing] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -403,6 +405,7 @@ export default function NotificationsScreen() {
               icon="notifications-off-outline"
               title={filter === 'unread' ? t('notifications.noUnread') : t('notifications.noNotifications')}
               description={filter === 'unread' ? t('notifications.noUnreadDesc') : t('notifications.noNotificationsDesc')}
+              offline={isOffline && notifications.length === 0}
             />
           }
           removeClippedSubviews

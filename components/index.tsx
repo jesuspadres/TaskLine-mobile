@@ -24,3 +24,4 @@ export { LoadingSkeleton, CardSkeleton, ListSkeleton, StatsSkeleton, SkeletonBox
 export { ToastProvider, showToast } from './Toast';
 export { FloatingActionButton } from './FloatingActionButton';
 export { OfflineBanner } from './OfflineBanner';
+export { LoadingOverlayProvider, showLoading, hideLoading } from './LoadingOverlay';

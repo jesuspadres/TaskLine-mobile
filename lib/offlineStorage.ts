@@ -20,6 +20,7 @@ export async function setCache(key: string, data: unknown): Promise<void> {
 export async function getCache<T>(
   key: string,
   maxAgeMs: number = DEFAULT_MAX_AGE,
+  ignoreExpiry = false,
 ): Promise<{ data: T; timestamp: number } | null> {
   try {
     const raw = await AsyncStorage.getItem(`${CACHE_PREFIX}${key}`);
@@ -27,7 +28,7 @@ export async function getCache<T>(
 
     const entry: CacheEntry<T> = JSON.parse(raw);
     const age = Date.now() - entry.timestamp;
-    if (age > maxAgeMs) {
+    if (!ignoreExpiry && age > maxAgeMs) {
       // Expired — remove and return null
       await AsyncStorage.removeItem(`${CACHE_PREFIX}${key}`);
       return null;

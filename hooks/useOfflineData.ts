@@ -15,6 +15,7 @@ interface UseOfflineDataResult<T> {
   loading: boolean;
   refreshing: boolean;
   isStale: boolean;
+  isOffline: boolean;
   error: string | null;
   refresh: () => void;
 }
@@ -49,8 +50,8 @@ export function useOfflineData<T>(
       return;
     }
 
-    // 1. Try cache first
-    const cached = await getCache<T>(cacheKey, maxAge);
+    // 1. Try cache first (when offline, ignore TTL — stale data is better than nothing)
+    const cached = await getCache<T>(cacheKey, maxAge, !isOnline);
     if (cached && mountedRef.current) {
       setData(cached.data);
       setIsStale(true);
@@ -109,5 +110,5 @@ export function useOfflineData<T>(
     loadCacheAndFetch();
   }, [loadCacheAndFetch]);
 
-  return { data, loading, refreshing, isStale, error, refresh };
+  return { data, loading, refreshing, isStale, isOffline: !isOnline, error, refresh };
 }

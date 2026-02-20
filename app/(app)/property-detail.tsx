@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -26,6 +26,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
+import { useOfflineData } from '@/hooks/useOfflineData';
 import type { Property, Client } from '@/lib/database.types';
 
 interface PropertyClient {
@@ -50,12 +51,54 @@ export default function PropertyDetailScreen() {
   const { t, locale } = useTranslations();
   const haptics = useHaptics();
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [property, setProperty] = useState<Property | null>(null);
-  const [clientInfo, setClientInfo] = useState<PropertyClient | null>(null);
-  const [linkedProjects, setLinkedProjects] = useState<LinkedProject[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
+  interface PropertyDetailData {
+    property: Property | null;
+    clientInfo: PropertyClient | null;
+    linkedProjects: LinkedProject[];
+    clients: Client[];
+  }
+
+  const { data: detailData, loading, refreshing, isOffline, refresh } = useOfflineData<PropertyDetailData>(
+    `property_detail:${id}`,
+    async () => {
+      const { data, error } = await supabase
+        .from('properties')
+        .select('*, clients(id, name, email)')
+        .eq('id', id!)
+        .single();
+      if (error) throw error;
+
+      const { clients: clientData, ...propData } = data as any;
+
+      let projects: LinkedProject[] = [];
+      if (clientData?.id) {
+        const { data: projData } = await supabase
+          .from('projects')
+          .select('id, name, status, budget_total, deadline')
+          .eq('client_id', clientData.id)
+          .order('created_at', { ascending: false })
+          .limit(10);
+        projects = (projData as LinkedProject[]) ?? [];
+      }
+
+      const { data: clientsList } = await supabase
+        .from('clients')
+        .select('*')
+        .order('name', { ascending: true });
+
+      return {
+        property: propData as Property,
+        clientInfo: clientData as PropertyClient | null,
+        linkedProjects: projects,
+        clients: (clientsList as Client[]) ?? [],
+      };
+    },
+    { enabled: !!id },
+  );
+
+  const { property, clientInfo, linkedProjects, clients } = detailData ?? {
+    property: null, clientInfo: null, linkedProjects: [], clients: [],
+  };
 
   // Edit modal
   const [showEditModal, setShowEditModal] = useState(false);
@@ -81,59 +124,9 @@ export default function PropertyDetailScreen() {
     clients.map((c) => ({ key: c.id, label: (c as any).email ? `${c.name} (${(c as any).email})` : c.name })),
   [clients]);
 
-  // ─── Data Fetching ───────────────────────────────────────────
-
-  const fetchData = useCallback(async () => {
-    if (!id) return;
-    try {
-      const { data, error } = await supabase
-        .from('properties')
-        .select('*, clients(id, name, email)')
-        .eq('id', id)
-        .single();
-
-      if (error) throw error;
-
-      const { clients: clientData, ...propData } = data as any;
-      setProperty(propData as Property);
-      setClientInfo(clientData as PropertyClient | null);
-
-      // Fetch linked projects for this client
-      if (clientData?.id) {
-        const { data: projects } = await supabase
-          .from('projects')
-          .select('id, name, status, budget_total, deadline')
-          .eq('client_id', clientData.id)
-          .order('created_at', { ascending: false })
-          .limit(10);
-        setLinkedProjects((projects as LinkedProject[]) ?? []);
-      }
-    } catch (error) {
-      secureLog.error('Property fetch error:', error);
-      showToast('error', t('propertyDetail.loadError'));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [id, t]);
-
-  const fetchClients = useCallback(async () => {
-    const { data } = await supabase
-      .from('clients')
-      .select('*')
-      .order('name', { ascending: true });
-    setClients((data as Client[]) ?? []);
-  }, []);
-
-  useEffect(() => {
-    fetchData();
-    fetchClients();
-  }, [fetchData, fetchClients]);
-
   const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchData();
-  }, [fetchData]);
+    refresh();
+  }, [refresh]);
 
   // ─── Edit ──────────────────────────────────────────────────
 
@@ -205,7 +198,7 @@ export default function PropertyDetailScreen() {
       if (error) throw error;
       haptics.notification(Haptics.NotificationFeedbackType.Success);
       setShowEditModal(false);
-      fetchData();
+      refresh();
       showToast('success', t('propertyDetail.propertyUpdated'));
     } catch (error: any) {
       secureLog.error('Property update error:', error);
@@ -341,6 +334,7 @@ export default function PropertyDetailScreen() {
           icon="home-outline"
           title={t('propertyDetail.notFound')}
           description={t('propertyDetail.notFoundDesc')}
+          offline={isOffline}
         />
       </SafeAreaView>
     );

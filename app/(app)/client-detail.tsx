@@ -95,7 +95,7 @@ export default function ClientDetailScreen() {
     invoicesTotal: number;
   }
 
-  const { data: clientData, loading, refreshing, refresh } = useOfflineData<ClientDetailData>(
+  const { data: clientData, loading, refreshing, isOffline, refresh } = useOfflineData<ClientDetailData>(
     `client_detail:${id}`,
     async () => {
       const [clientRes, propsRes, projRes, invRes, reqRes, bookRes] = await Promise.all([
@@ -463,6 +463,7 @@ export default function ClientDetailScreen() {
           icon="person-outline"
           title={t('clientDetail.notFound')}
           description={t('clientDetail.notFoundDesc')}
+          offline={isOffline}
         />
       </SafeAreaView>
     );

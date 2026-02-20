@@ -66,7 +66,7 @@ export async function websiteApiFetch(path: string, options?: RequestInit): Prom
 export async function createCheckoutSession(tier: string, interval: 'month' | 'year'): Promise<{ url: string; sessionId: string }> {
   const res = await websiteApiFetch('/api/stripe/create-checkout-session', {
     method: 'POST',
-    body: JSON.stringify({ tier, interval }),
+    body: JSON.stringify({ tier, interval, source: 'mobile' }),
   });
 
   if (!res.ok) {
@@ -77,6 +77,32 @@ export async function createCheckoutSession(tier: string, interval: 'month' | 'y
   const data = await res.json();
   if (data.url) return { url: data.url, sessionId: data.sessionId };
   throw new Error('No checkout URL returned');
+}
+
+/**
+ * Update an existing Stripe subscription (upgrade, downgrade, or change interval).
+ * For upgrades that require payment, returns a checkout URL.
+ * For downgrades/interval changes, the update is applied immediately or scheduled.
+ */
+export async function updateSubscription(
+  tier: string,
+  interval: 'month' | 'year',
+): Promise<{ checkoutUrl?: string; success: boolean }> {
+  const res = await websiteApiFetch('/api/stripe/update-subscription', {
+    method: 'POST',
+    body: JSON.stringify({ tier, interval }),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Update failed (${res.status})`);
+  }
+
+  const data = await res.json();
+  if (data.requiresCheckout && data.checkoutUrl) {
+    return { checkoutUrl: data.checkoutUrl, success: true };
+  }
+  return { success: true };
 }
 
 /**
@@ -156,6 +182,45 @@ export async function syncSubscription(checkoutSessionId?: string): Promise<{ ti
 }
 
 /**
+ * Reactivate a subscription that was scheduled for cancellation.
+ * Calls the website API which updates Stripe and the database.
+ */
+export async function reactivateSubscription(): Promise<void> {
+  const res = await websiteApiFetch('/api/stripe/reactivate-subscription', {
+    method: 'POST',
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Reactivation failed (${res.status})`);
+  }
+}
+
+/**
+ * Cancel the current subscription.
+ * Credit-aware: if the customer has credit, the subscription is extended
+ * until the credit runs out instead of canceling at period end.
+ */
+export async function cancelSubscription(): Promise<{
+  success: boolean;
+  cancelAt: string | null;
+  effectiveEndDate: string;
+  creditBalance: number;
+  cyclesCovered: number;
+}> {
+  const res = await websiteApiFetch('/api/stripe/cancel-subscription', {
+    method: 'POST',
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Cancellation failed (${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
  * Send a counter offer for a booking (propose alternative date/time).
  * Max 3 rounds per booking.
  */
@@ -199,6 +264,47 @@ export async function deleteAccount(): Promise<void> {
     const errorData = await res.json().catch(() => ({}));
     throw new Error(errorData.error || `Account deletion failed (${res.status})`);
   }
+}
+
+// ================================================================
+// Subscription Preview
+// ================================================================
+
+export interface SubscriptionPreview {
+  hasSubscription: boolean;
+  currentTier: string;
+  currentInterval: string;
+  newTier: string;
+  newInterval: string;
+  prorationAmount: number;
+  totalDue: number;
+  unusedCredit: number;
+  accountCredit: number;
+  accountCreditApplied: number;
+  remainingCredit: number;
+  currency: string;
+  immediateCharge: boolean;
+  currentPeriodEnd: string | null;
+}
+
+/**
+ * Preview the cost of changing subscription (proration, total due, etc.).
+ * Calls the GET endpoint which does NOT modify the subscription.
+ */
+export async function previewSubscriptionChange(
+  tier: string,
+  interval: 'month' | 'year',
+): Promise<SubscriptionPreview> {
+  const res = await websiteApiFetch(
+    `/api/stripe/update-subscription?tier=${tier}&interval=${interval}`,
+  );
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Preview failed (${res.status})`);
+  }
+
+  return res.json();
 }
 
 // ================================================================

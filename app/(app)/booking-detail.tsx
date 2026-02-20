@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
+import { useOfflineData } from '@/hooks/useOfflineData';
 import { sendCounterOffer } from '@/lib/websiteApi';
 
 interface BookingData {
@@ -66,17 +67,38 @@ export default function BookingDetailScreen() {
     no_show: { bg: colors.surfaceSecondary, text: colors.textTertiary },
   }), [colors]);
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [booking, setBooking] = useState<BookingData | null>(null);
-  const [property, setProperty] = useState<{
-    id: string;
-    name: string;
-    address_formatted: string | null;
-    address_street: string | null;
-    address_city: string | null;
-    address_state: string | null;
-  } | null>(null);
+  interface BookingDetailCache {
+    booking: BookingData | null;
+    property: { id: string; name: string; address_formatted: string | null; address_street: string | null; address_city: string | null; address_state: string | null; } | null;
+  }
+
+  const { data: detailData, loading, refreshing, isOffline, refresh } = useOfflineData<BookingDetailCache>(
+    `booking_detail:${id}`,
+    async () => {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('*, client:clients(id, name, email, phone)')
+        .eq('id', id!)
+        .single();
+      if (error) throw error;
+
+      let propData = null;
+      if ((data as any)?.property_id) {
+        const { data: pData } = await supabase
+          .from('properties')
+          .select('id, name, address_formatted, address_street, address_city, address_state')
+          .eq('id', (data as any).property_id)
+          .single();
+        propData = (pData as any) || null;
+      }
+
+      return { booking: data as any, property: propData };
+    },
+    { enabled: !!id },
+  );
+
+  const booking = detailData?.booking ?? null;
+  const property = detailData?.property ?? null;
   const [updatingStatus, setUpdatingStatus] = useState(false);
 
   // Confirm dialog state
@@ -93,46 +115,9 @@ export default function BookingDetailScreen() {
   const [counterMessage, setCounterMessage] = useState('');
   const [counterSending, setCounterSending] = useState(false);
 
-  // ================================================================
-  // FETCH
-  // ================================================================
-  const fetchBooking = useCallback(async () => {
-    if (!id) return;
-    try {
-      const { data, error } = await supabase
-        .from('bookings')
-        .select('*, client:clients(id, name, email, phone)')
-        .eq('id', id)
-        .single();
-      if (error) throw error;
-      setBooking(data as any);
-
-      // Fetch property separately (no FK constraint on bookings→properties)
-      if ((data as any)?.property_id) {
-        const { data: propData } = await supabase
-          .from('properties')
-          .select('id, name, address_formatted, address_street, address_city, address_state')
-          .eq('id', (data as any).property_id)
-          .single();
-        setProperty((propData as any) || null);
-      } else {
-        setProperty(null);
-      }
-    } catch (error) {
-      secureLog.error('Error fetching booking:', error);
-      showToast('error', t('bookingDetail.loadError'));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [id, t]);
-
-  useEffect(() => { fetchBooking(); }, [fetchBooking]);
-
   const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchBooking();
-  }, [fetchBooking]);
+    refresh();
+  }, [refresh]);
 
   // ================================================================
   // ACTIONS
@@ -158,7 +143,7 @@ export default function BookingDetailScreen() {
         .eq('id', booking.id);
       if (error) throw error;
       haptics.notification(Haptics.NotificationFeedbackType.Success);
-      setBooking({ ...booking, status: confirmAction });
+      refresh();
       showToast('success', t('bookingDetail.statusUpdated'));
     } catch (error: any) {
       secureLog.error('Error updating booking status:', error);
@@ -199,7 +184,7 @@ export default function BookingDetailScreen() {
         .eq('id', booking.id);
       if (error) throw error;
       haptics.notification(Haptics.NotificationFeedbackType.Success);
-      setBooking({ ...booking, status: 'completed' });
+      refresh();
       showToast('success', t('bookingDetail.completed'));
       // Navigate to invoices to create one for this booking
       router.push(`/(app)/invoices` as any);
@@ -257,8 +242,7 @@ export default function BookingDetailScreen() {
       // Link property to this booking
       if (data?.id) {
         await supabase.from('bookings').update({ property_id: data.id } as any).eq('id', booking.id);
-        setBooking({ ...booking, property_id: data.id });
-        setProperty({ id: data.id, name, address_formatted: booking.address_formatted, address_street: addressParts[0] || null, address_city: addressParts[1] || null, address_state: addressParts[2] || null });
+        refresh();
       }
 
       haptics.notification(Haptics.NotificationFeedbackType.Success);
@@ -336,7 +320,7 @@ export default function BookingDetailScreen() {
           <Text style={[styles.headerTitle, { color: colors.text }]}>{t('bookingDetail.title')}</Text>
           <View style={styles.headerSpacer} />
         </View>
-        <EmptyState icon="calendar-outline" title={t('bookingDetail.notFound')} description={t('bookingDetail.notFoundDesc')} />
+        <EmptyState icon="calendar-outline" title={t('bookingDetail.notFound')} description={t('bookingDetail.notFoundDesc')} offline={isOffline} />
       </SafeAreaView>
     );
   }

@@ -12,6 +12,7 @@ import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { ToastProvider } from '@/components/Toast';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { OfflineBanner } from '@/components/OfflineBanner';
+import { LoadingOverlayProvider } from '@/components/LoadingOverlay';
 import { ENV } from '@/lib/env';
 
 Sentry.init({
@@ -84,14 +85,16 @@ function RootLayout() {
   return (
     <ErrorBoundary>
       <ToastProvider>
-        <StatusBar style={isDark ? 'light' : 'dark'} />
-        <View style={{ flex: 1 }}>
-          <OfflineBanner />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-            <Stack.Screen name="(app)" options={{ headerShown: false }} />
-          </Stack>
-        </View>
+        <LoadingOverlayProvider>
+          <StatusBar style={isDark ? 'light' : 'dark'} />
+          <View style={{ flex: 1 }}>
+            <OfflineBanner />
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+              <Stack.Screen name="(app)" options={{ headerShown: false }} />
+            </Stack>
+          </View>
+        </LoadingOverlayProvider>
       </ToastProvider>
     </ErrorBoundary>
   );

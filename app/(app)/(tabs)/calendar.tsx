@@ -96,7 +96,7 @@ export default function CalendarScreen() {
     year: 'numeric',
   });
 
-  const { data: calendarData, loading, refreshing, refresh } = useOfflineData<CalendarEvent[]>(
+  const { data: calendarData, loading, refreshing, isOffline, refresh } = useOfflineData<CalendarEvent[]>(
     'calendar_events',
     async () => {
       const allEvents: CalendarEvent[] = [];
@@ -714,6 +714,7 @@ export default function CalendarScreen() {
               icon="calendar-outline"
               title={t('calendar.noUpcoming')}
               description={t('calendar.noUpcomingDesc')}
+              offline={isOffline && !(calendarData ?? []).length}
             />
           }
           removeClippedSubviews

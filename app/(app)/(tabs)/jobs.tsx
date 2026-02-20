@@ -101,7 +101,7 @@ export default function JobsScreen() {
   const [projectCountMap, setProjectCountMap] = useState<Record<string, number>>({});
 
   // --- Requests state ---
-  const { data: requests, loading: requestsLoading, refreshing: requestsRefreshing, refresh: refreshRequests } = useOfflineData<RequestWithClient[]>(
+  const { data: requests, loading: requestsLoading, refreshing: requestsRefreshing, isOffline: requestsOffline, refresh: refreshRequests } = useOfflineData<RequestWithClient[]>(
     'requests',
     async () => {
       const { data, error } = await supabase
@@ -134,7 +134,7 @@ export default function JobsScreen() {
   const [showRequestSortModal, setShowRequestSortModal] = useState(false);
 
   // --- Bookings state ---
-  const { data: bookings, loading: bookingsLoading, refreshing: bookingsRefreshing, refresh: refreshBookings } = useOfflineData<BookingWithClient[]>(
+  const { data: bookings, loading: bookingsLoading, refreshing: bookingsRefreshing, isOffline: bookingsOffline, refresh: refreshBookings } = useOfflineData<BookingWithClient[]>(
     'bookings',
     async () => {
       const { data, error } = await supabase
@@ -955,6 +955,7 @@ export default function JobsScreen() {
                     : t('requests.noRequestsShareDesc')}
                   actionLabel={!requestSearch && requestFilterStatus === 'all' ? t('requests.sharePortal') : undefined}
                   onAction={!requestSearch && requestFilterStatus === 'all' ? handleShareLink : undefined}
+                  offline={requestsOffline && !(requests ?? []).length && !requestSearch}
                 />
               }
             />
@@ -1054,6 +1055,7 @@ export default function JobsScreen() {
                     : t('requests.noBookingsShareDesc')}
                   actionLabel={!bookingSearch && bookingFilterStatus === 'all' ? t('requests.sharePortal') : undefined}
                   onAction={!bookingSearch && bookingFilterStatus === 'all' ? handleShareBookingLink : undefined}
+                  offline={bookingsOffline && !(bookings ?? []).length && !bookingSearch}
               />
             }
           />
@@ -1077,7 +1079,7 @@ export default function JobsScreen() {
             style={[
               styles.sortOption,
               { borderBottomColor: colors.border },
-              requestSort === option.key && { backgroundColor: colors.primaryLight || colors.infoLight },
+              requestSort === option.key && { backgroundColor: `${colors.primary}14` },
             ]}
             onPress={() => {
               setRequestSort(option.key);
@@ -1111,7 +1113,7 @@ export default function JobsScreen() {
             style={[
               styles.sortOption,
               { borderBottomColor: colors.border },
-              bookingSort === option.key && { backgroundColor: colors.primaryLight || colors.infoLight },
+              bookingSort === option.key && { backgroundColor: `${colors.primary}14` },
             ]}
             onPress={() => {
               setBookingSort(option.key);

@@ -196,7 +196,7 @@ export default function DashboardScreen() {
         recentInvoices: (recentInvoicesResult.data as any) || [],
       };
     },
-    { maxAge: 15 * 60 * 1000 }, // 15 min cache for dashboard
+    { maxAge: 60 * 60 * 1000 }, // 1 hour cache for dashboard (offline ignores TTL)
   );
 
   const { stats, revenue, newRequests, todayTasks, upcomingDeadlines, upcomingBookings, upcomingTasks, recentInvoices } = dashboardData ?? defaultDashboard;

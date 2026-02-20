@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,7 @@ import { Spacing, FontSizes, BorderRadius, Shadows } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
 import { showToast } from '@/components';
+import { useOfflineData } from '@/hooks/useOfflineData';
 import { ENV } from '@/lib/env';
 
 type TabType = 'requests' | 'custom';
@@ -51,50 +52,44 @@ export default function QRSettingsScreen() {
   const [sizePreset, setSizePreset] = useState<SizePreset>('print');
   const [customUrl, setCustomUrl] = useState('');
   const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [hasAppliedCache, setHasAppliedCache] = useState<string | null>(null);
+
+  interface QRSettingsCache {
+    requests: { foreground_color: string; background_color: string; size_preset: SizePreset; custom_url?: string } | null;
+    custom: { foreground_color: string; background_color: string; size_preset: SizePreset; custom_url?: string } | null;
+  }
+
+  const { data: qrData, loading, refresh } = useOfflineData<QRSettingsCache>(
+    'qr_settings',
+    async () => {
+      const { data, error } = await (supabase.from('user_qr_codes') as any)
+        .select('*')
+        .eq('user_id', user!.id);
+
+      const rows = (!error && data) ? data as any[] : [];
+      return {
+        requests: rows.find((r: any) => r.qr_type === 'requests') || null,
+        custom: rows.find((r: any) => r.qr_type === 'custom') || null,
+      };
+    },
+    { enabled: !!user?.id },
+  );
+
+  // Apply cached settings to local form state when data loads or tab changes
+  const cacheFingerprint = `${activeTab}:${JSON.stringify(qrData)}`;
+  if (qrData && hasAppliedCache !== cacheFingerprint) {
+    const settings = qrData[activeTab];
+    setFgColor(settings?.foreground_color || '#000000');
+    setBgColor(settings?.background_color || '#ffffff');
+    setSizePreset(settings?.size_preset || 'print');
+    if (activeTab === 'custom') {
+      setCustomUrl(settings?.custom_url || '');
+    }
+    setHasAppliedCache(cacheFingerprint);
+  }
 
   const requestUrl = `${ENV.APP_URL}/request/${user?.id || ''}`;
   const currentUrl = activeTab === 'requests' ? requestUrl : customUrl;
-
-  const loadSettings = useCallback(async (tab: TabType) => {
-    if (!user?.id) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const { data, error } = await (supabase.from('user_qr_codes') as any)
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('qr_type', tab)
-        .single();
-
-      if (!error && data) {
-        setFgColor(data.foreground_color || '#000000');
-        setBgColor(data.background_color || '#ffffff');
-        setSizePreset(data.size_preset || 'print');
-        if (tab === 'custom' && data.custom_url) {
-          setCustomUrl(data.custom_url);
-        }
-      } else {
-        // Reset to defaults if no saved settings
-        setFgColor('#000000');
-        setBgColor('#ffffff');
-        setSizePreset('print');
-        if (tab === 'custom') {
-          setCustomUrl('');
-        }
-      }
-    } catch {
-      // Table may not exist yet - use defaults silently
-    } finally {
-      setLoading(false);
-    }
-  }, [user?.id]);
-
-  useEffect(() => {
-    loadSettings(activeTab);
-  }, [activeTab, loadSettings]);
 
   const handleTabChange = (tab: TabType) => {
     if (tab === activeTab) return;
@@ -129,6 +124,7 @@ export default function QRSettingsScreen() {
       );
 
       if (error) throw error;
+      refresh();
       showToast('success', t('qrSettings.saved'));
     } catch (error: any) {
       showToast('error', error.message || t('common.error'));

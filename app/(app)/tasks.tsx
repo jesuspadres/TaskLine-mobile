@@ -47,7 +47,7 @@ export default function TasksScreen() {
   const haptics = useHaptics();
   const { filterContainerStyle, onFilterLayout, onScroll, filterHeight } = useCollapsibleFilters();
 
-  const { data: tasks, loading, refreshing, refresh } = useOfflineData<TaskWithProject[]>(
+  const { data: tasks, loading, refreshing, isOffline, refresh } = useOfflineData<TaskWithProject[]>(
     'tasks',
     async () => {
       const { data, error } = await supabase
@@ -950,6 +950,7 @@ export default function TasksScreen() {
           }
           actionLabel={!searchQuery && filterStatus === 'all' ? t('tasks.addTask') : undefined}
           onAction={!searchQuery && filterStatus === 'all' ? openAddModal : undefined}
+          offline={isOffline && !(tasks ?? []).length && !searchQuery}
         />
       );
     }

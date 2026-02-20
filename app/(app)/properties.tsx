@@ -93,7 +93,7 @@ export default function PropertiesScreen() {
   const { t } = useTranslations();
   const haptics = useHaptics();
   const { filterContainerStyle, onFilterLayout, onScroll, filterHeight } = useCollapsibleFilters();
-  const { data: properties, loading, refreshing, refresh } = useOfflineData<PropertyWithClient[]>(
+  const { data: properties, loading, refreshing, isOffline, refresh } = useOfflineData<PropertyWithClient[]>(
     'properties',
     async () => {
       const { data, error } = await supabase
@@ -890,6 +890,7 @@ export default function PropertiesScreen() {
               }
               actionLabel={!searchQuery && activeFilterCount === 0 ? t('properties.addProperty') : undefined}
               onAction={!searchQuery && activeFilterCount === 0 ? openAddModal : undefined}
+              offline={isOffline && !(properties ?? []).length && !searchQuery}
             />
           }
         />

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Platform,
   Linking,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
@@ -27,14 +28,18 @@ import {
 } from '@/lib/plans';
 import { Spacing, FontSizes, BorderRadius, Shadows } from '@/constants/theme';
 import { ConfirmDialog, showToast } from '@/components';
-import { supabase } from '@/lib/supabase';
-import { useAuthStore } from '@/stores/authStore';
 import {
   createCheckoutSession,
+  updateSubscription,
+  previewSubscriptionChange,
   createPortalSession,
   createFoundingLockInSession,
   syncSubscription,
+  reactivateSubscription,
+  cancelSubscription,
+  type SubscriptionPreview,
 } from '@/lib/websiteApi';
+import { getPlan } from '@/lib/plans';
 import { secureLog } from '@/lib/security';
 import { ENV } from '@/lib/env';
 
@@ -43,15 +48,31 @@ export default function PlansScreen() {
   const { t } = useTranslations();
   const router = useRouter();
   const subscription = useSubscription();
-  const { user } = useAuthStore();
   const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>('annual');
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [canceling, setCanceling] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
+  const [upgradePreview, setUpgradePreview] = useState<SubscriptionPreview | null>(null);
+  const [upgradePlan, setUpgradePlan] = useState<PlanData | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [upgrading, setUpgrading] = useState(false);
 
   const isIOS = Platform.OS === 'ios';
   const currentTierIndex = TIER_ORDER.indexOf(subscription.tier);
+
+  // Track whether we just returned from a checkout to trigger foreground polling
+  const pendingCheckoutRef = useRef(false);
+
+  // Refresh subscription when app returns to foreground (e.g. after Stripe payment in external browser)
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        subscription.refresh();
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   /** On iOS, direct users to the website for subscription purchases */
   const handleSubscribeOnWeb = useCallback(() => {
@@ -70,14 +91,18 @@ export default function PlansScreen() {
     [t],
   );
 
-  const handleSelectPlan = async (plan: PlanData) => {
+  const handleSelectPlan = async (plan: PlanData, isIntervalChangeOnly = false) => {
     const planName = t(`plans.${plan.nameKey}`);
     if (plan.comingSoon) {
       Alert.alert(t('plans.comingSoon'), `${planName}`);
       return;
     }
 
-    if (plan.slug === subscription.tier) return;
+    const interval = billingPeriod === 'annual' ? 'year' : 'month';
+    const currentInterval = subscription.billingPeriod === 'annual' ? 'year' : 'month';
+
+    // If same tier and same interval, do nothing
+    if (plan.slug === subscription.tier && interval === currentInterval && !isIntervalChangeOnly) return;
 
     if (plan.slug === 'free') {
       Alert.alert(t('plans.downgrade'), t('plans.cancelWarning'), [
@@ -91,25 +116,84 @@ export default function PlansScreen() {
       return;
     }
 
+    if (subscription.isFree) {
+      // New subscription — go directly to Stripe Checkout
+      setCheckoutLoading(true);
+      try {
+        const { url, sessionId } = await createCheckoutSession(plan.slug, interval);
+
+        // openAuthSessionAsync auto-closes the browser when it detects
+        // a redirect to our app scheme (taskline://)
+        const result = await WebBrowser.openAuthSessionAsync(url, 'taskline://');
+
+        // Extract session_id from the redirect URL if available
+        let returnedSessionId = sessionId;
+        if (result.type === 'success' && result.url) {
+          const match = result.url.match(/session_id=([^&]+)/);
+          if (match) returnedSessionId = match[1];
+        }
+
+        // Poll for subscription sync with retries — webhook may take a few seconds
+        if (returnedSessionId) {
+          const RETRY_DELAYS = [0, 2000, 4000, 8000];
+          let synced = false;
+          for (const delay of RETRY_DELAYS) {
+            if (delay > 0) await new Promise(r => setTimeout(r, delay));
+            try {
+              const syncResult = await syncSubscription(returnedSessionId);
+              if (syncResult.synced && syncResult.tier !== 'free') {
+                await subscription.refresh();
+                showToast('success', t('plans.subscriptionSynced'));
+                synced = true;
+                break;
+              }
+            } catch {
+              // Keep retrying
+            }
+          }
+          if (!synced) {
+            // Final fallback: just refresh from DB in case webhook arrived
+            await subscription.refresh();
+          }
+        }
+      } catch (error: any) {
+        secureLog.error('Checkout error:', error.message);
+        showToast('error', t('plans.checkoutError'));
+      } finally {
+        setCheckoutLoading(false);
+      }
+    } else {
+      // Existing subscription — show preview modal first
+      setPreviewLoading(true);
+      try {
+        const preview = await previewSubscriptionChange(plan.slug, interval);
+        setUpgradePreview(preview);
+        setUpgradePlan(plan);
+      } catch (error: any) {
+        secureLog.error('Preview error:', error.message);
+        showToast('error', t('plans.previewError'));
+      } finally {
+        setPreviewLoading(false);
+      }
+    }
+  };
+
+  const handleConfirmUpgrade = async () => {
+    if (!upgradePlan) return;
+    const interval = billingPeriod === 'annual' ? 'year' : 'month';
+
+    setUpgradePreview(null);
+    setUpgradePlan(null);
     setCheckoutLoading(true);
     try {
-      const interval = billingPeriod === 'annual' ? 'year' : 'month';
-      const { url, sessionId } = await createCheckoutSession(plan.slug, interval);
-      await WebBrowser.openBrowserAsync(url);
-
-      if (sessionId) {
-        try {
-          const result = await syncSubscription(sessionId);
-          if (result.synced) {
-            subscription.refresh();
-            showToast('success', t('plans.subscriptionSynced'));
-          }
-        } catch (syncErr) {
-          secureLog.error('Subscription sync failed (will retry):', syncErr);
-        }
+      const result = await updateSubscription(upgradePlan.slug, interval);
+      if (result.checkoutUrl) {
+        await WebBrowser.openBrowserAsync(result.checkoutUrl);
       }
+      await subscription.refresh();
+      showToast('success', t('plans.subscriptionSynced'));
     } catch (error: any) {
-      secureLog.error('Checkout error:', error.message);
+      secureLog.error('Upgrade error:', error.message);
       showToast('error', t('plans.checkoutError'));
     } finally {
       setCheckoutLoading(false);
@@ -121,6 +205,7 @@ export default function PlansScreen() {
     try {
       const url = await createFoundingLockInSession();
       await WebBrowser.openBrowserAsync(url);
+      subscription.refresh();
     } catch (error: any) {
       secureLog.error('Lock-in error:', error.message);
       showToast('error', t('plans.checkoutError'));
@@ -134,6 +219,7 @@ export default function PlansScreen() {
     try {
       const url = await createPortalSession();
       await WebBrowser.openBrowserAsync(url);
+      subscription.refresh();
     } catch (error: any) {
       secureLog.error('Portal error:', error.message);
       showToast('error', t('plans.billingError'));
@@ -146,16 +232,20 @@ export default function PlansScreen() {
     setShowCancelConfirm(false);
     setCanceling(true);
     try {
-      const { error } = await (supabase.from('subscriptions') as any)
-        .update({ cancel_at_period_end: true } as any)
-        .eq('user_id', user?.id)
-        .in('status', ['active', 'trialing']);
-
-      if (error) throw error;
-      showToast('success', t('plans.cancelConfirmed'));
-      subscription.refresh();
+      const result = await cancelSubscription();
+      if (result.cancelAt) {
+        subscription.updateOptimistic({
+          cancelAtPeriodEnd: true,
+          cancelAt: result.cancelAt,
+        });
+      } else {
+        subscription.updateOptimistic({ cancelAtPeriodEnd: true });
+      }
+      showToast('success', t('plans.cancelSuccess'));
+      await subscription.refresh();
     } catch (error: any) {
-      showToast('error', error.message || t('common.error'));
+      secureLog.error('Cancel error:', error.message);
+      showToast('error', error.message || t('plans.billingError'));
     } finally {
       setCanceling(false);
     }
@@ -164,12 +254,8 @@ export default function PlansScreen() {
   const handleResumeSubscription = async () => {
     setCanceling(true);
     try {
-      const { error } = await (supabase.from('subscriptions') as any)
-        .update({ cancel_at_period_end: false } as any)
-        .eq('user_id', user?.id)
-        .in('status', ['active', 'trialing']);
-
-      if (error) throw error;
+      await reactivateSubscription();
+      subscription.updateOptimistic({ cancelAtPeriodEnd: false, cancelAt: null });
       showToast('success', t('plans.resumed'));
       subscription.refresh();
     } catch (error: any) {
@@ -380,7 +466,7 @@ export default function PlansScreen() {
           <View
             style={[
               styles.iosWebNotice,
-              { backgroundColor: colors.primaryLight, borderColor: colors.primary },
+              { backgroundColor: `${colors.primary}14`, borderColor: colors.primary },
             ]}
           >
             <Ionicons name="information-circle" size={20} color={colors.primary} />
@@ -502,35 +588,67 @@ export default function PlansScreen() {
                   </Text>
                 </View>
               ) : isCurrent ? (
-                subscription.tier === 'free' ? (
-                  <View
-                    style={[styles.actionButton, { backgroundColor: colors.surfaceSecondary }]}
-                  >
-                    <Text style={[styles.actionButtonText, { color: colors.textTertiary }]}>
-                      {t('plans.currentPlan')}
-                    </Text>
-                  </View>
-                ) : subscription.cancelAtPeriodEnd ? (
-                  <TouchableOpacity
-                    style={[styles.actionButton, { backgroundColor: colors.primary }]}
-                    onPress={handleResumeSubscription}
-                    disabled={canceling}
-                  >
-                    <Text style={[styles.actionButtonText, { color: '#fff' }]}>
-                      {t('plans.resumeSubscription')}
-                    </Text>
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity
-                    style={[styles.actionButton, { backgroundColor: colors.surfaceSecondary }]}
-                    onPress={() => setShowCancelConfirm(true)}
-                    disabled={canceling}
-                  >
-                    <Text style={[styles.actionButtonText, { color: colors.textSecondary }]}>
-                      {t('plans.cancelSubscription')}
-                    </Text>
-                  </TouchableOpacity>
-                )
+                (() => {
+                  // Check if user can change billing interval for the same tier
+                  const selectedInterval = billingPeriod === 'annual' ? 'year' : 'month';
+                  const currentInterval = subscription.billingPeriod === 'annual' ? 'year' : 'month';
+                  const canChangeInterval = subscription.tier !== 'free' && currentInterval && selectedInterval !== currentInterval;
+
+                  if (canChangeInterval) {
+                    const isUpgradeToAnnual = selectedInterval === 'year';
+                    return (
+                      <TouchableOpacity
+                        style={[styles.actionButton, { backgroundColor: isUpgradeToAnnual ? colors.primary : colors.surfaceSecondary }]}
+                        onPress={() => handleSelectPlan(plan, true)}
+                        disabled={checkoutLoading}
+                      >
+                        {checkoutLoading ? (
+                          <ActivityIndicator size="small" color={isUpgradeToAnnual ? '#fff' : colors.text} />
+                        ) : (
+                          <Text style={[styles.actionButtonText, { color: isUpgradeToAnnual ? '#fff' : colors.text }]}>
+                            {isUpgradeToAnnual ? t('plans.switchToAnnual') : t('plans.switchToMonthly')}
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  }
+
+                  if (subscription.tier === 'free') {
+                    return (
+                      <View style={[styles.actionButton, { backgroundColor: colors.surfaceSecondary }]}>
+                        <Text style={[styles.actionButtonText, { color: colors.textTertiary }]}>
+                          {t('plans.currentPlan')}
+                        </Text>
+                      </View>
+                    );
+                  }
+
+                  if (subscription.cancelAtPeriodEnd) {
+                    return (
+                      <TouchableOpacity
+                        style={[styles.actionButton, { backgroundColor: colors.primary }]}
+                        onPress={handleResumeSubscription}
+                        disabled={canceling}
+                      >
+                        <Text style={[styles.actionButtonText, { color: '#fff' }]}>
+                          {t('plans.resumeSubscription')}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  }
+
+                  return (
+                    <TouchableOpacity
+                      style={[styles.actionButton, { backgroundColor: colors.surfaceSecondary }]}
+                      onPress={() => setShowCancelConfirm(true)}
+                      disabled={canceling}
+                    >
+                      <Text style={[styles.actionButtonText, { color: colors.textSecondary }]}>
+                        {t('plans.cancelSubscription')}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })()
               ) : isIOS ? (
                 /* iOS: No in-app purchases — direct to website */
                 isUpgrade ? (
@@ -575,7 +693,11 @@ export default function PlansScreen() {
                         { color: isUpgrade ? '#fff' : colors.text },
                       ]}
                     >
-                      {isUpgrade ? t('plans.upgrade') : t('plans.downgrade')}
+                      {isUpgrade
+                        ? subscription.isTrialEligible
+                          ? t('plans.startFreeTrial')
+                          : t('plans.upgrade')
+                        : t('plans.downgrade')}
                     </Text>
                   )}
                 </TouchableOpacity>
@@ -614,7 +736,7 @@ export default function PlansScreen() {
                     style={[
                       styles.comparisonValueCell,
                       { width: COL_WIDTH },
-                      plan.popular && { backgroundColor: colors.primaryLight },
+                      plan.popular && { backgroundColor: `${colors.primary}14` },
                     ]}
                   >
                     <Text
@@ -656,6 +778,9 @@ export default function PlansScreen() {
                         <Text style={[styles.comparisonLabel, { color: colors.text }]}>
                           {t(`plans.featureLabels.${featureKey}`)}
                         </Text>
+                        <Text style={[styles.comparisonLabelDesc, { color: colors.textTertiary }]} numberOfLines={2}>
+                          {t(`plans.featureDescriptions.${featureKey}`)}
+                        </Text>
                       </View>
                       {PLANS.map((plan) => {
                         const value =
@@ -666,7 +791,7 @@ export default function PlansScreen() {
                             style={[
                               styles.comparisonValueCell,
                               { width: COL_WIDTH },
-                              plan.popular && { backgroundColor: colors.primaryLight },
+                              plan.popular && { backgroundColor: `${colors.primary}14` },
                             ]}
                           >
                             {renderComparisonValue(value)}
@@ -745,7 +870,7 @@ export default function PlansScreen() {
                 {subscription.currentPeriodEnd && (
                   <Text style={[styles.manageLinkSubtitle, { color: colors.textSecondary }]}>
                     {subscription.cancelAtPeriodEnd
-                      ? `${t('plans.cancelsOn')} ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}`
+                      ? `${t('plans.cancelsOn')} ${new Date(subscription.cancelAt || subscription.currentPeriodEnd).toLocaleDateString()}`
                       : `${t('plans.renewsOn')} ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}`}
                   </Text>
                 )}
@@ -773,7 +898,7 @@ export default function PlansScreen() {
       </ScrollView>
 
       {/* Loading overlay */}
-      {checkoutLoading && (
+      {(checkoutLoading || previewLoading) && (
         <View style={styles.loadingOverlay}>
           <View style={[styles.loadingCard, { backgroundColor: colors.surface }]}>
             <ActivityIndicator size="large" color={colors.primary} />
@@ -793,6 +918,216 @@ export default function PlansScreen() {
         onConfirm={handleCancelSubscription}
         onCancel={() => setShowCancelConfirm(false)}
       />
+
+      {/* Upgrade Confirmation Bottom Sheet */}
+      {!!upgradePreview && !!upgradePlan && (() => {
+        const currentPlan = getPlan(subscription.tier);
+        const currentInterval = subscription.billingPeriod;
+        const currentPeriod = currentInterval === 'annual' ? 'annual' : 'monthly';
+        const currentMonthlyPrice = currentPlan.price[currentPeriod as BillingPeriod];
+        const newMonthlyPrice = upgradePlan.price[billingPeriod];
+        const currentBillingAmount = currentInterval === 'annual' ? currentMonthlyPrice * 12 : currentMonthlyPrice;
+        const newBillingAmount = billingPeriod === 'annual' ? newMonthlyPrice * 12 : newMonthlyPrice;
+        const currentIntervalLabel = currentInterval === 'annual' ? t('plans.perYear') : t('plans.perMonth');
+        const newIntervalLabel = billingPeriod === 'annual' ? t('plans.perYear') : t('plans.perMonth');
+        const tierIndex = TIER_ORDER.indexOf(upgradePlan.slug);
+        const isUpgradeAction = tierIndex > currentTierIndex;
+        const isIntervalChangeOnly = upgradePlan.slug === subscription.tier;
+
+        const cyclesCovered = upgradePreview.remainingCredit > 0 && newBillingAmount > 0
+          ? Math.floor(upgradePreview.remainingCredit / newBillingAmount)
+          : 0;
+        let firstChargeDate: Date | null = null;
+        if (cyclesCovered > 0 && upgradePreview.currentPeriodEnd) {
+          firstChargeDate = new Date(upgradePreview.currentPeriodEnd);
+          if (billingPeriod === 'monthly') {
+            firstChargeDate.setMonth(firstChargeDate.getMonth() + cyclesCovered);
+          } else {
+            firstChargeDate.setFullYear(firstChargeDate.getFullYear() + cyclesCovered);
+          }
+        }
+
+        return (
+          <View style={styles.sheetOverlay}>
+            <TouchableOpacity
+              style={styles.sheetBackdrop}
+              activeOpacity={1}
+              onPress={() => { setUpgradePreview(null); setUpgradePlan(null); }}
+            />
+            <View style={[styles.sheetContainer, { backgroundColor: colors.surface }]}>
+              {/* Header */}
+              <View style={[styles.sheetHeader, { borderBottomColor: colors.border }]}>
+                <Text style={[styles.sheetTitle, { color: colors.text }]}>
+                  {t('plans.confirmChange')}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => { setUpgradePreview(null); setUpgradePlan(null); }}
+                  hitSlop={12}
+                >
+                  <Ionicons name="close" size={22} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView
+                style={styles.sheetBody}
+                bounces={false}
+                showsVerticalScrollIndicator={false}
+              >
+                {/* Plan comparison — side by side */}
+                <View style={styles.sheetPlanRow}>
+                  <View style={[styles.sheetPlanCard, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+                    <Text style={[styles.sheetPlanLabel, { color: colors.textTertiary }]}>
+                      {t('plans.currentPlanLabel')}
+                    </Text>
+                    <Text style={[styles.sheetPlanName, { color: colors.text }]}>
+                      {t(`plans.${currentPlan.nameKey}`)}
+                    </Text>
+                    <Text style={[styles.sheetPlanPrice, { color: colors.textSecondary }]}>
+                      ${currentBillingAmount}{currentIntervalLabel}
+                    </Text>
+                  </View>
+
+                  <Ionicons name="arrow-forward" size={18} color={colors.textTertiary} style={{ marginHorizontal: Spacing.xs }} />
+
+                  <View style={[styles.sheetPlanCard, { backgroundColor: colors.primary, borderColor: colors.primary }]}>
+                    <Text style={[styles.sheetPlanLabel, { color: 'rgba(255,255,255,0.8)' }]}>
+                      {t('plans.newPlanLabel')}
+                    </Text>
+                    <Text style={[styles.sheetPlanName, { color: '#fff' }]}>
+                      {t(`plans.${upgradePlan.nameKey}`)}
+                    </Text>
+                    <Text style={[styles.sheetPlanPrice, { color: 'rgba(255,255,255,0.9)' }]}>
+                      ${newBillingAmount}{newIntervalLabel}
+                    </Text>
+                    {billingPeriod === 'annual' && (
+                      <Text style={[styles.sheetPlanSub, { color: 'rgba(255,255,255,0.65)' }]}>
+                        (${newMonthlyPrice}{t('plans.perMonth')})
+                      </Text>
+                    )}
+                  </View>
+                </View>
+
+                {/* Pricing breakdown */}
+                <View style={[styles.sheetBreakdown, { borderTopColor: colors.border }]}>
+                  {upgradePreview.unusedCredit > 0 && (
+                    <View style={styles.sheetRow}>
+                      <Text style={[styles.sheetRowLabel, { color: colors.success }]}>
+                        {t('plans.unusedPlanCredit')}
+                      </Text>
+                      <Text style={[styles.sheetRowValue, { color: colors.success }]}>
+                        -${upgradePreview.unusedCredit.toFixed(2)}
+                      </Text>
+                    </View>
+                  )}
+                  {(upgradePreview.accountCreditApplied ?? 0) > 0 && (
+                    <View style={styles.sheetRow}>
+                      <Text style={[styles.sheetRowLabel, { color: colors.success }]}>
+                        {t('plans.accountCredit')}
+                      </Text>
+                      <Text style={[styles.sheetRowValue, { color: colors.success }]}>
+                        -${upgradePreview.accountCreditApplied.toFixed(2)}
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Due today — emphasized */}
+                  <View style={[styles.sheetRow, styles.sheetRowHighlight, { backgroundColor: colors.surfaceSecondary, borderRadius: BorderRadius.md }]}>
+                    <Text style={[styles.sheetRowLabel, { color: colors.text, fontWeight: '700' }]}>
+                      {t('plans.dueToday')}
+                    </Text>
+                    <Text style={[styles.sheetRowValue, { color: colors.text, fontWeight: '800', fontSize: FontSizes.lg }]}>
+                      {upgradePreview.totalDue > 0
+                        ? `$${upgradePreview.totalDue.toFixed(2)}`
+                        : t('plans.noCharge')}
+                    </Text>
+                  </View>
+
+                  {/* Credit notes */}
+                  {cyclesCovered > 0 && (
+                    <Text style={[styles.sheetNote, { color: colors.success }]}>
+                      {t('plans.creditCoversBills', {
+                        amount: upgradePreview.remainingCredit.toFixed(2),
+                        count: String(cyclesCovered),
+                      })}
+                    </Text>
+                  )}
+                  {upgradePreview.remainingCredit > 0 && cyclesCovered === 0 && (
+                    <Text style={[styles.sheetNote, { color: colors.success }]}>
+                      {t('plans.remainingCreditNote', {
+                        amount: upgradePreview.remainingCredit.toFixed(2),
+                      })}
+                    </Text>
+                  )}
+                  {upgradePreview.prorationAmount > 0 && (
+                    <Text style={[styles.sheetNote, { color: colors.textTertiary }]}>
+                      {t('plans.proratedCredit')}
+                    </Text>
+                  )}
+
+                  {/* Next billing info */}
+                  <View style={[styles.sheetRow, { marginTop: Spacing.md }]}>
+                    <Text style={[styles.sheetRowLabel, { color: colors.textSecondary }]}>
+                      {t('plans.nextBilling')}
+                    </Text>
+                    <Text style={[styles.sheetRowValue, { color: colors.textSecondary }]}>
+                      ${newBillingAmount}{newIntervalLabel}
+                    </Text>
+                  </View>
+                  {firstChargeDate ? (
+                    <View style={styles.sheetRow}>
+                      <Text style={[styles.sheetRowLabel, { color: colors.textSecondary }]}>
+                        {t('plans.firstChargeDate')}
+                      </Text>
+                      <Text style={[styles.sheetRowValue, { color: colors.textSecondary }]}>
+                        {firstChargeDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </Text>
+                    </View>
+                  ) : upgradePreview.currentPeriodEnd && (
+                    <View style={styles.sheetRow}>
+                      <Text style={[styles.sheetRowLabel, { color: colors.textSecondary }]}>
+                        {t('plans.renewalDate')}
+                      </Text>
+                      <Text style={[styles.sheetRowValue, { color: colors.textSecondary }]}>
+                        {new Date(upgradePreview.currentPeriodEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={{ height: Spacing.lg }} />
+                </View>
+              </ScrollView>
+
+              {/* Footer buttons */}
+              <View style={[styles.sheetFooter, { borderTopColor: colors.border }]}>
+                <TouchableOpacity
+                  style={[styles.sheetCancelBtn, { borderColor: colors.border }]}
+                  onPress={() => { setUpgradePreview(null); setUpgradePlan(null); }}
+                >
+                  <Text style={[styles.sheetCancelBtnText, { color: colors.textSecondary }]}>
+                    {t('common.cancel')}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.sheetConfirmBtn, { backgroundColor: colors.primary }]}
+                  onPress={handleConfirmUpgrade}
+                  disabled={upgrading}
+                >
+                  {upgrading ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.sheetConfirmBtnText}>
+                      {isIntervalChangeOnly
+                        ? t('plans.confirmChange')
+                        : isUpgradeAction
+                          ? t('plans.confirmUpgrade')
+                          : t('plans.confirmDowngrade')}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        );
+      })()}
     </SafeAreaView>
   );
 }
@@ -1103,6 +1438,11 @@ const styles = StyleSheet.create({
   comparisonLabel: {
     fontSize: FontSizes.sm,
   },
+  comparisonLabelDesc: {
+    fontSize: 10,
+    marginTop: 1,
+    lineHeight: 13,
+  },
   comparisonValueText: {
     fontSize: FontSizes.xs,
     fontWeight: '600',
@@ -1191,5 +1531,131 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: FontSizes.sm,
+  },
+  // Upgrade confirmation bottom sheet
+  sheetOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 200,
+    justifyContent: 'flex-end',
+  },
+  sheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  sheetContainer: {
+    borderTopLeftRadius: BorderRadius['2xl'],
+    borderTopRightRadius: BorderRadius['2xl'],
+    maxHeight: '85%',
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing.md,
+    borderBottomWidth: 1,
+  },
+  sheetTitle: {
+    fontSize: FontSizes.lg,
+    fontWeight: '700',
+  },
+  sheetBody: {
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.lg,
+  },
+  // Side-by-side plan cards
+  sheetPlanRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  sheetPlanCard: {
+    flex: 1,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    padding: Spacing.md,
+    alignItems: 'center',
+  },
+  sheetPlanLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  sheetPlanName: {
+    fontSize: FontSizes.lg,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  sheetPlanPrice: {
+    fontSize: FontSizes.sm,
+    marginTop: 2,
+  },
+  sheetPlanSub: {
+    fontSize: 10,
+    marginTop: 1,
+  },
+  // Breakdown
+  sheetBreakdown: {
+    borderTopWidth: 1,
+    marginTop: Spacing.lg,
+    paddingTop: Spacing.md,
+    gap: Spacing.sm,
+  },
+  sheetRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  sheetRowHighlight: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  sheetRowLabel: {
+    fontSize: FontSizes.sm,
+    fontWeight: '500',
+    flex: 1,
+  },
+  sheetRowValue: {
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
+    textAlign: 'right',
+  },
+  sheetNote: {
+    fontSize: FontSizes.xs,
+  },
+  // Footer
+  sheetFooter: {
+    flexDirection: 'row',
+    gap: Spacing.md,
+    padding: Spacing.xl,
+    paddingBottom: Spacing['2xl'],
+    borderTopWidth: 1,
+  },
+  sheetCancelBtn: {
+    flex: 1,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+  },
+  sheetCancelBtnText: {
+    fontSize: FontSizes.md,
+    fontWeight: '600',
+  },
+  sheetConfirmBtn: {
+    flex: 2,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+  },
+  sheetConfirmBtnText: {
+    color: '#fff',
+    fontSize: FontSizes.md,
+    fontWeight: '700',
   },
 });

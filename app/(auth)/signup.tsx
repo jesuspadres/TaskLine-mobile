@@ -297,6 +297,17 @@ export default function SignupScreen() {
     </View>
   );
 
+  // Age check — must be at least 13
+  const isUnder13 = useMemo(() => {
+    if (!dateOfBirth) return false;
+    const today = new Date();
+    const age = today.getFullYear() - dateOfBirth.getFullYear();
+    const monthDiff = today.getMonth() - dateOfBirth.getMonth();
+    const dayDiff = today.getDate() - dateOfBirth.getDate();
+    const actualAge = monthDiff < 0 || (monthDiff === 0 && dayDiff < 0) ? age - 1 : age;
+    return actualAge < 13;
+  }, [dateOfBirth]);
+
   // Step 1: Date of Birth (centered)
   const renderDobStep = () => (
     <View style={styles.stepContent}>
@@ -312,11 +323,16 @@ export default function SignupScreen() {
             maxDate={new Date()}
           />
         </View>
+        {isUnder13 && (
+          <Text style={[styles.ageRestrictionText, { color: colors.error }]}>
+            {t('auth.ageRestriction')}
+          </Text>
+        )}
       </View>
       <TouchableOpacity
-        style={[styles.continueBtn, { backgroundColor: colors.primary }, !dateOfBirth && styles.btnDisabled]}
+        style={[styles.continueBtn, { backgroundColor: colors.primary }, (!dateOfBirth || isUnder13) && styles.btnDisabled]}
         onPress={goNext}
-        disabled={!dateOfBirth}
+        disabled={!dateOfBirth || isUnder13}
       >
         <Text style={styles.continueBtnText}>{t('auth.continue')}</Text>
       </TouchableOpacity>
@@ -886,6 +902,7 @@ const styles = StyleSheet.create({
   stepTitle: { fontSize: FontSizes['2xl'], fontWeight: 'bold', marginBottom: Spacing.sm },
   centeredTitle: { textAlign: 'center' },
   stepSubtitle: { fontSize: FontSizes.sm, marginBottom: Spacing.xl },
+  ageRestrictionText: { fontSize: FontSizes.sm, fontWeight: '500', textAlign: 'center', marginTop: Spacing.md },
 
   // Inputs
   label: { fontSize: FontSizes.sm, fontWeight: '600', marginBottom: Spacing.sm, alignSelf: 'stretch' },
