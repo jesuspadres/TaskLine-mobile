@@ -1,21 +1,23 @@
 // Environment configuration
-// Copy this file to env.ts and fill in your values
+// Secrets are loaded from .env via app.config.ts > extra
+import Constants from 'expo-constants';
+
+const extra = Constants.expoConfig?.extra ?? {};
 
 export const ENV = {
-  // Supabase Configuration
-  // Get these from your Supabase project settings
+  // Supabase Configuration (anon key is public-by-design)
   SUPABASE_URL: 'https://your-project.supabase.co',
   SUPABASE_ANON_KEY: 'your-anon-key',
 
   // App Configuration
   APP_URL: 'https://taskline.solvrlabs.com',
 
-  // Google OAuth
-  GOOGLE_WEB_CLIENT_ID: 'your-google-web-client-id',
+  // Google Maps API Key (loaded from .env via app.config.ts extra)
+  // Create .env file with: GOOGLE_MAPS_API_KEY=your-key-here
+  GOOGLE_MAPS_API_KEY: (extra.googleMapsApiKey as string) || '',
 
-  // Google Maps API Key
-  // Restrict in Google Cloud Console to your iOS bundle ID and Android package + SHA-1
-  GOOGLE_MAPS_API_KEY: 'your-google-maps-api-key',
+  // Sentry DSN (public-by-design)
+  SENTRY_DSN: 'your-sentry-dsn',
 };
 
 // Validate environment
@@ -32,5 +34,10 @@ export function validateEnv() {
     );
     return false;
   }
+
+  if (!ENV.GOOGLE_MAPS_API_KEY) {
+    console.warn('⚠️ GOOGLE_MAPS_API_KEY not set. Add it to .env file.');
+  }
+
   return true;
 }

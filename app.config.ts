@@ -94,6 +94,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
   ],
   extra: {
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
     router: {
       origin: false,
     },

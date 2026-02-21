@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { setCache, getCache } from '@/lib/offlineStorage';
+import { setCache, getCache, subscribeCacheKey } from '@/lib/offlineStorage';
 import { useOfflineStore } from '@/stores/offlineStore';
 
 const DEFAULT_MAX_AGE = 24 * 60 * 60 * 1000; // 24 hours
@@ -103,6 +103,13 @@ export function useOfflineData<T>(
   useEffect(() => {
     loadCacheAndFetch();
   }, [loadCacheAndFetch]);
+
+  // Re-read from cache when another screen updates/invalidates this cache key
+  useEffect(() => {
+    return subscribeCacheKey(cacheKey, () => {
+      loadCacheAndFetch();
+    });
+  }, [cacheKey, loadCacheAndFetch]);
 
   const refresh = useCallback(() => {
     setRefreshing(true);

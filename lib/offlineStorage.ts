@@ -3,6 +3,21 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const CACHE_PREFIX = '@taskline_cache:';
 const DEFAULT_MAX_AGE = 24 * 60 * 60 * 1000; // 24 hours
 
+// ─── Cache change subscription system ────────────────────────────
+// Allows useOfflineData to re-read when its cache key is updated/invalidated
+type CacheListener = () => void;
+const cacheListeners = new Map<string, Set<CacheListener>>();
+
+export function subscribeCacheKey(key: string, listener: CacheListener): () => void {
+  if (!cacheListeners.has(key)) cacheListeners.set(key, new Set());
+  cacheListeners.get(key)!.add(listener);
+  return () => { cacheListeners.get(key)?.delete(listener); };
+}
+
+function notifyCacheListeners(key: string) {
+  cacheListeners.get(key)?.forEach((fn) => fn());
+}
+
 interface CacheEntry<T> {
   data: T;
   timestamp: number;
@@ -46,6 +61,7 @@ export async function invalidateCache(key: string): Promise<void> {
   } catch {
     // Silently fail
   }
+  notifyCacheListeners(key);
 }
 
 export async function updateCacheData<T>(
@@ -62,6 +78,7 @@ export async function updateCacheData<T>(
   } catch {
     // Silently fail
   }
+  notifyCacheListeners(key);
 }
 
 export async function clearAllCache(): Promise<void> {

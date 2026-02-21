@@ -26,6 +26,7 @@ import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useOfflineData } from '@/hooks/useOfflineData';
 import { useOfflineMutation } from '@/hooks/useOfflineMutation';
+import { invalidateCache } from '@/lib/offlineStorage';
 import {
   Modal, Input, Button, Select, DatePicker, EmptyState,
   SearchBar, ListSkeleton, ConfirmDialog,
@@ -661,6 +662,7 @@ export default function InvoicesScreen() {
         if (itemsError) secureLog.error('Error saving line items:', itemsError);
       }
 
+      await invalidateCache('invoices');
       setShowAddModal(false);
       resetForm();
       refresh();

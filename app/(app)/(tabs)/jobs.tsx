@@ -22,6 +22,7 @@ import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useOfflineData } from '@/hooks/useOfflineData';
 import { useOfflineMutation } from '@/hooks/useOfflineMutation';
+import { invalidateCache, updateCacheData } from '@/lib/offlineStorage';
 import { ENV } from '@/lib/env';
 import {
   Modal, EmptyState, FilterChips, SearchBar, ListSkeleton,
@@ -390,6 +391,8 @@ export default function JobsScreen() {
         .eq('id', convertTarget.id);
       if (updateError) throw updateError;
 
+      await invalidateCache('requests');
+      await invalidateCache('projects');
       haptics.notification(Haptics.NotificationFeedbackType.Success);
       refreshRequests();
       showToast('success', t('requests.convertSuccess'));

@@ -11,6 +11,8 @@ export { Modal } from './Modal';
 export { Select } from './Select';
 export type { SelectOption } from './Select';
 export { DatePicker } from './DatePicker';
+export { AddressAutocomplete, geocodeAddress } from './AddressAutocomplete';
+export type { AddressComponents } from './AddressAutocomplete';
 
 // New components
 export { StatusBadge } from './StatusBadge';

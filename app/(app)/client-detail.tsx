@@ -15,6 +15,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { secureLog } from '@/lib/security';
+import { invalidateCache, updateCacheData } from '@/lib/offlineStorage';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import {
   Modal, Input, Button, Badge, Avatar, EmptyState, StatusBadge,
@@ -211,6 +212,7 @@ export default function ClientDetailScreen() {
         cacheKeys: [`client_detail:${id}`],
       });
       if (error) throw error;
+      await invalidateCache('clients');
       setShowEditModal(false);
       refresh();
       showToast('success', t('clientDetail.clientUpdated'));
@@ -242,6 +244,9 @@ export default function ClientDetailScreen() {
                 cacheKeys: [`client_detail:${id}`],
               });
               if (error) throw error;
+              await updateCacheData<any[]>('clients', (cached) =>
+                (cached ?? []).filter((c: any) => c.id !== client.id)
+              );
               showToast('success', t('clientDetail.clientDeleted'));
               router.back();
             } catch (error: any) {
@@ -262,7 +267,7 @@ export default function ClientDetailScreen() {
         data: { onboarded: !client.onboarded },
         matchColumn: 'id',
         matchValue: client.id,
-        cacheKeys: [`client_detail:${id}`],
+        cacheKeys: [`client_detail:${id}`, 'clients'],
       });
       if (error) throw error;
       refresh();
@@ -335,7 +340,7 @@ export default function ClientDetailScreen() {
         table: 'properties',
         operation: 'insert',
         data: { ...propertyPayload(), client_id: id, user_id: user.id },
-        cacheKeys: [`client_detail:${id}`],
+        cacheKeys: [`client_detail:${id}`, 'properties'],
       });
       if (error) throw error;
       setShowAddPropertyModal(false);
@@ -359,7 +364,7 @@ export default function ClientDetailScreen() {
         data: propertyPayload(),
         matchColumn: 'id',
         matchValue: selectedProperty.id,
-        cacheKeys: [`client_detail:${id}`],
+        cacheKeys: [`client_detail:${id}`, 'properties'],
       });
       if (error) throw error;
       setShowEditPropertyModal(false);
@@ -391,7 +396,7 @@ export default function ClientDetailScreen() {
                 operation: 'delete',
                 matchColumn: 'id',
                 matchValue: selectedProperty.id,
-                cacheKeys: [`client_detail:${id}`],
+                cacheKeys: [`client_detail:${id}`, 'properties'],
               });
               if (error) throw error;
               setShowEditPropertyModal(false);

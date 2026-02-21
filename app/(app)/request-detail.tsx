@@ -31,6 +31,7 @@ import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useOfflineData } from '@/hooks/useOfflineData';
 import { useOfflineMutation } from '@/hooks/useOfflineMutation';
+import { invalidateCache } from '@/lib/offlineStorage';
 import { useSubscription } from '@/hooks/useSubscription';
 import { analyzeRequest, draftProject, respondToClient, submitAiFeedback } from '@/lib/websiteApi';
 import type { AiAnalysis } from '@/lib/websiteApi';
@@ -250,7 +251,7 @@ export default function RequestDetailScreen() {
         data: { status: confirmAction },
         matchColumn: 'id',
         matchValue: request.id,
-        cacheKeys: [`request_detail:${id}`],
+        cacheKeys: [`request_detail:${id}`, 'requests'],
       });
       if (error) throw error;
       haptics.notification(Haptics.NotificationFeedbackType.Success);
@@ -286,6 +287,8 @@ export default function RequestDetailScreen() {
         user_id: user.id,
       } as any).select('id').single();
       if (error) throw error;
+      await invalidateCache('projects');
+      await invalidateCache('requests');
       haptics.notification(Haptics.NotificationFeedbackType.Success);
       showToast('success', t('requests.convertSuccess'));
       refresh();
@@ -317,7 +320,7 @@ export default function RequestDetailScreen() {
           address_lat: request.address_lat,
           address_lng: request.address_lng,
         },
-        cacheKeys: [`request_detail:${id}`],
+        cacheKeys: [`request_detail:${id}`, 'properties'],
       });
       if (error) throw error;
       haptics.notification(Haptics.NotificationFeedbackType.Success);
@@ -379,6 +382,7 @@ export default function RequestDetailScreen() {
         }));
         await supabase.from('project_line_items').insert(items as any);
       }
+      await invalidateCache('projects');
       haptics.notification(Haptics.NotificationFeedbackType.Success);
       showToast('success', t('ai.projectCreated'));
       router.push({ pathname: '/(app)/project-detail', params: { id: newProject.id } } as any);

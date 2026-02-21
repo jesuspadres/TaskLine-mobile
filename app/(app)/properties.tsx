@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
+import { ENV } from '@/lib/env';
 import { secureLog } from '@/lib/security';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
@@ -33,7 +34,10 @@ import {
   ListSkeleton,
   StatCard,
   showToast,
+  AddressAutocomplete,
+  geocodeAddress,
 } from '@/components';
+import type { AddressComponents } from '@/components';
 import type {
   Property,
   Client,
@@ -74,6 +78,8 @@ const initialFormData = {
   city: '',
   state: '',
   zip_code: '',
+  address_lat: null as number | null,
+  address_lng: null as number | null,
   gate_code: '',
   lockbox_code: '',
   alarm_code: '',
@@ -247,6 +253,17 @@ export default function PropertiesScreen() {
       ].filter(Boolean);
       const addressFormatted = addressParts.join(', ') || formData.name.trim();
 
+      // Geocode fallback: if address exists but no coordinates, geocode it
+      let lat = formData.address_lat;
+      let lng = formData.address_lng;
+      if ((!lat || !lng) && addressFormatted && ENV.GOOGLE_MAPS_API_KEY) {
+        const coords = await geocodeAddress(addressFormatted, ENV.GOOGLE_MAPS_API_KEY);
+        if (coords) {
+          lat = coords.lat;
+          lng = coords.lng;
+        }
+      }
+
       const newProperty: Record<string, any> = {
         user_id: user.id,
         client_id: formData.client_id,
@@ -259,6 +276,8 @@ export default function PropertiesScreen() {
         address_city: formData.city.trim() || null,
         address_state: formData.state.trim() || null,
         address_zip: formData.zip_code.trim() || null,
+        address_lat: lat,
+        address_lng: lng,
         gate_code: formData.gate_code.trim() || null,
         lockbox_code: formData.lockbox_code.trim() || null,
         alarm_code: formData.alarm_code.trim() || null,
@@ -558,13 +577,23 @@ export default function PropertiesScreen() {
       {/* Address Section */}
       <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('properties.address')}</Text>
 
-      <Input
+      <AddressAutocomplete
         label={t('properties.addressLine1')}
         placeholder={t('properties.streetAddress')}
         value={formData.address_line1}
-        onChangeText={(text) => setFormData({ ...formData, address_line1: text })}
-        leftIcon="location-outline"
-        autoCapitalize="words"
+        onChangeText={(text) => setFormData((prev) => ({ ...prev, address_line1: text }))}
+        onAddressSelect={(addr: AddressComponents) => {
+          setFormData((prev) => ({
+            ...prev,
+            address_line1: addr.street,
+            address_line2: addr.unit || prev.address_line2,
+            city: addr.city,
+            state: addr.state_short || addr.state,
+            zip_code: addr.zip,
+            address_lat: addr.lat,
+            address_lng: addr.lng,
+          }));
+        }}
       />
       <Input
         label={t('properties.addressLine2')}

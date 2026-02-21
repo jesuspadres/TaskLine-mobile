@@ -24,6 +24,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useOfflineData } from '@/hooks/useOfflineData';
+import { invalidateCache, updateCacheData } from '@/lib/offlineStorage';
 import { sendCounterOffer } from '@/lib/websiteApi';
 
 interface BookingData {
@@ -142,6 +143,7 @@ export default function BookingDetailScreen() {
         .update(updateData as any)
         .eq('id', booking.id);
       if (error) throw error;
+      await invalidateCache('bookings');
       haptics.notification(Haptics.NotificationFeedbackType.Success);
       refresh();
       showToast('success', t('bookingDetail.statusUpdated'));
@@ -183,6 +185,7 @@ export default function BookingDetailScreen() {
         .update({ status: 'completed' } as any)
         .eq('id', booking.id);
       if (error) throw error;
+      await invalidateCache('bookings');
       haptics.notification(Haptics.NotificationFeedbackType.Success);
       refresh();
       showToast('success', t('bookingDetail.completed'));
@@ -242,6 +245,8 @@ export default function BookingDetailScreen() {
       // Link property to this booking
       if (data?.id) {
         await supabase.from('bookings').update({ property_id: data.id } as any).eq('id', booking.id);
+        await invalidateCache('properties');
+        await invalidateCache('bookings');
         refresh();
       }
 

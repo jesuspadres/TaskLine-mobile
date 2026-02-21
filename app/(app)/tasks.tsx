@@ -21,6 +21,7 @@ import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useOfflineData } from '@/hooks/useOfflineData';
 import { useOfflineMutation } from '@/hooks/useOfflineMutation';
+import { updateCacheData } from '@/lib/offlineStorage';
 import {
   Modal, Input, Button, Select, DatePicker, EmptyState,
   SearchBar, FilterChips, ListSkeleton, ConfirmDialog,
@@ -350,11 +351,12 @@ export default function TasksScreen() {
   const handleDeleteTask = async () => {
     if (!taskToDelete) return;
     try {
+      const deletedId = taskToDelete.id;
       const { error } = await mutate({
         table: 'tasks',
         operation: 'delete',
-        matchValue: taskToDelete.id,
-        cacheKeys: ['tasks'],
+        matchValue: deletedId,
+        cacheKeys: [],
       });
 
       if (error) throw error;
@@ -364,7 +366,9 @@ export default function TasksScreen() {
       setShowViewModal(false);
       setSelectedTask(null);
       setTaskToDelete(null);
-      refresh();
+      await updateCacheData<any[]>('tasks', (cached) =>
+        (cached ?? []).filter((t: any) => t.id !== deletedId)
+      );
       showToast('success', t('tasks.taskDeleted'));
     } catch (error: any) {
       secureLog.error('Error deleting task:', error);
@@ -376,12 +380,15 @@ export default function TasksScreen() {
   const archiveTask = async (task: TaskWithProject) => {
     haptics.impact();
     try {
+      const now = new Date().toISOString();
       const { error } = await (supabase.from('tasks') as any)
-        .update({ archived_at: new Date().toISOString() })
+        .update({ archived_at: now })
         .eq('id', task.id)
         .eq('user_id', user?.id);
       if (error) throw error;
-      refresh();
+      await updateCacheData<any[]>('tasks', (cached) =>
+        (cached ?? []).map((t: any) => t.id === task.id ? { ...t, archived_at: now } : t)
+      );
       showToast('success', t('tasks.taskArchived'));
     } catch (error: any) {
       secureLog.error('Error archiving task:', error);
@@ -397,7 +404,9 @@ export default function TasksScreen() {
         .eq('id', task.id)
         .eq('user_id', user?.id);
       if (error) throw error;
-      refresh();
+      await updateCacheData<any[]>('tasks', (cached) =>
+        (cached ?? []).map((t: any) => t.id === task.id ? { ...t, archived_at: null } : t)
+      );
       showToast('success', t('tasks.taskUnarchived'));
     } catch (error: any) {
       secureLog.error('Error unarchiving task:', error);
@@ -412,12 +421,16 @@ export default function TasksScreen() {
       const completedTasks = activeTasks.filter((t) => (t.status as string) === 'completed');
       if (completedTasks.length === 0) return;
       const ids = completedTasks.map((t) => t.id);
+      const now = new Date().toISOString();
       const { error } = await (supabase.from('tasks') as any)
-        .update({ archived_at: new Date().toISOString() })
+        .update({ archived_at: now })
         .in('id', ids)
         .eq('user_id', user?.id);
       if (error) throw error;
-      refresh();
+      const idSet = new Set(ids);
+      await updateCacheData<any[]>('tasks', (cached) =>
+        (cached ?? []).map((t: any) => idSet.has(t.id) ? { ...t, archived_at: now } : t)
+      );
       showToast('success', t('tasks.tasksArchived', { count: String(ids.length) }));
     } catch (error: any) {
       secureLog.error('Error mass archiving:', error);
@@ -438,7 +451,10 @@ export default function TasksScreen() {
         .in('id', ids)
         .eq('user_id', user.id);
       if (error) throw error;
-      refresh();
+      const idSet = new Set(ids);
+      await updateCacheData<any[]>('tasks', (cached) =>
+        (cached ?? []).filter((t: any) => !idSet.has(t.id))
+      );
       showToast('success', t('tasks.archivedDeleted'));
     } catch (error: any) {
       secureLog.error('Error deleting archived:', error);

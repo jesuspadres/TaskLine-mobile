@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -17,11 +17,15 @@ import { Ionicons } from '@expo/vector-icons';
 import MapView, { Marker } from 'react-native-maps';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '@/lib/supabase';
+import { ENV } from '@/lib/env';
 import { secureLog } from '@/lib/security';
+import { invalidateCache, updateCacheData } from '@/lib/offlineStorage';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import {
   Modal, Input, Button, Badge, Select, EmptyState, ListSkeleton, StatusBadge, DatePicker, ConfirmDialog, showToast,
+  AddressAutocomplete, geocodeAddress,
 } from '@/components';
+import type { AddressComponents } from '@/components';
 import { useAuthStore } from '@/stores/authStore';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
@@ -124,13 +128,18 @@ export default function PropertyDetailScreen() {
     clients = [],
   } = detailData ?? {};
 
+  // Geocoded coordinates fallback (for properties missing lat/lng)
+  const [geocodedCoords, setGeocodedCoords] = useState<{ lat: number; lng: number } | null>(null);
+
   // Edit modal
   const [showEditModal, setShowEditModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     name: '', client_id: '', property_type: '',
     address_line1: '', address_line2: '', city: '', state: '',
-    zip_code: '', gate_code: '', lockbox_code: '', alarm_code: '',
+    zip_code: '',
+    address_lat: null as number | null, address_lng: null as number | null,
+    gate_code: '', lockbox_code: '', alarm_code: '',
     pets: '', hazards: '', square_footage: '', year_built: '',
     notes: '', is_primary: false,
   });
@@ -208,6 +217,8 @@ export default function PropertyDetailScreen() {
       city: p.address_city || property.city || '',
       state: p.address_state || property.state || '',
       zip_code: p.address_zip || property.zip_code || '',
+      address_lat: p.address_lat ?? property.latitude ?? null,
+      address_lng: p.address_lng ?? property.longitude ?? null,
       gate_code: property.gate_code || '',
       lockbox_code: property.lockbox_code || '',
       alarm_code: property.alarm_code || '',
@@ -235,16 +246,39 @@ export default function PropertyDetailScreen() {
     if (!validateForm() || !property || !user) return;
     setSaving(true);
     try {
+      // Build address_formatted from form fields
+      const addressParts = [
+        form.address_line1.trim(),
+        form.address_line2.trim(),
+        [form.city.trim(), form.state.trim()].filter(Boolean).join(', '),
+        form.zip_code.trim(),
+      ].filter(Boolean);
+      const addressFormatted = addressParts.join(', ') || form.name.trim();
+
+      // Geocode fallback: if address exists but no coordinates, geocode it
+      let lat = form.address_lat;
+      let lng = form.address_lng;
+      if ((!lat || !lng) && addressFormatted && ENV.GOOGLE_MAPS_API_KEY) {
+        const coords = await geocodeAddress(addressFormatted, ENV.GOOGLE_MAPS_API_KEY);
+        if (coords) {
+          lat = coords.lat;
+          lng = coords.lng;
+        }
+      }
+
       const payload: Record<string, any> = {
         name: form.name.trim(),
         client_id: form.client_id || property.client_id,
         property_type: form.property_type || null,
         // Write to website column names (address_street, address_city, etc.)
+        address_formatted: addressFormatted,
         address_street: form.address_line1.trim() || null,
         address_unit: form.address_line2.trim() || null,
         address_city: form.city.trim() || null,
         address_state: form.state.trim() || null,
         address_zip: form.zip_code.trim() || null,
+        address_lat: lat,
+        address_lng: lng,
         gate_code: form.gate_code.trim() || null,
         lockbox_code: form.lockbox_code.trim() || null,
         alarm_code: form.alarm_code.trim() || null,
@@ -261,6 +295,8 @@ export default function PropertyDetailScreen() {
         .eq('id', property.id)
         .eq('user_id', user.id);
       if (error) throw error;
+      // Invalidate parent list so changes show immediately when navigating back
+      await invalidateCache('properties');
       haptics.notification(Haptics.NotificationFeedbackType.Success);
       setShowEditModal(false);
       refresh();
@@ -288,6 +324,11 @@ export default function PropertyDetailScreen() {
               const { error } = await supabase.from('properties')
                 .delete().eq('id', property.id).eq('user_id', user.id);
               if (error) throw error;
+              // Remove from properties list cache immediately
+              await updateCacheData<any[]>('properties', (cached) =>
+                (cached ?? []).filter((p: any) => p.id !== property.id)
+              );
+              await invalidateCache(`property_detail:${property.id}`);
               haptics.notification(Haptics.NotificationFeedbackType.Success);
               showToast('success', t('propertyDetail.propertyDeleted'));
               router.back();
@@ -396,6 +437,7 @@ export default function PropertyDetailScreen() {
         showToast('success', t('propertyDetail.equipmentCreated'));
       }
 
+      await invalidateCache(`property_detail:${id}`);
       haptics.notification(Haptics.NotificationFeedbackType.Success);
       setShowEquipmentModal(false);
       refresh();
@@ -415,6 +457,7 @@ export default function PropertyDetailScreen() {
         .eq('id', editingEquipment.id)
         .eq('user_id', user.id);
       if (error) throw error;
+      await invalidateCache(`property_detail:${id}`);
       haptics.notification(Haptics.NotificationFeedbackType.Success);
       setShowDeleteEquipmentConfirm(false);
       setShowEquipmentModal(false);
@@ -508,6 +551,33 @@ export default function PropertyDetailScreen() {
     return parts.length > 0 ? parts.join(', ') : null;
   };
 
+  // Geocode fallback: if property has address but no coordinates, geocode on display
+  useEffect(() => {
+    if (!property) return;
+    const p = property as any;
+    const hasCoords = p.address_lat != null && p.address_lng != null;
+    if (hasCoords) {
+      setGeocodedCoords(null);
+      return;
+    }
+    const addr = formatAddress();
+    if (!addr || !ENV.GOOGLE_MAPS_API_KEY) return;
+
+    let cancelled = false;
+    geocodeAddress(addr, ENV.GOOGLE_MAPS_API_KEY).then((coords) => {
+      if (!cancelled && coords) {
+        setGeocodedCoords(coords);
+        // Also persist to DB so it only needs to geocode once
+        supabase.from('properties')
+          .update({ address_lat: coords.lat, address_lng: coords.lng } as any)
+          .eq('id', property.id)
+          .eq('user_id', user!.id)
+          .then(() => invalidateCache('properties'));
+      }
+    });
+    return () => { cancelled = true; };
+  }, [property?.id]);
+
   const formatDate = (dateStr: string) => {
     try {
       return new Date(dateStr).toLocaleDateString(dateLocale, {
@@ -591,8 +661,12 @@ export default function PropertyDetailScreen() {
   const propType = p.property_type as string | null | undefined;
   const typeLabel = getPropertyTypeLabel(propType);
   const typeIcon = getPropertyTypeIcon(propType);
-  const lat = p.address_lat ?? property.latitude;
-  const lng = p.address_lng ?? property.longitude;
+  const rawLat = p.address_lat ?? geocodedCoords?.lat ?? null;
+  const rawLng = p.address_lng ?? geocodedCoords?.lng ?? null;
+  // Ensure valid numeric coords for MapView
+  const lat = typeof rawLat === 'number' ? rawLat : parseFloat(rawLat);
+  const lng = typeof rawLng === 'number' ? rawLng : parseFloat(rawLng);
+  const hasValidCoords = !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
   const petInfo = p.pet_details || property.pets;
   const notesText = p.property_notes || property.notes;
 
@@ -707,7 +781,7 @@ export default function PropertyDetailScreen() {
         )}
 
         {/* Map Preview */}
-        {lat != null && lng != null && Platform.OS !== 'web' && (
+        {hasValidCoords && Platform.OS !== 'web' && (
           <TouchableOpacity
             style={[styles.mapCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
             onPress={openMaps}
@@ -1036,13 +1110,23 @@ export default function PropertyDetailScreen() {
           <Text style={[styles.formSectionLabel, { color: colors.text, borderTopColor: colors.borderLight }]}>
             {t('propertyDetail.address')}
           </Text>
-          <Input
+          <AddressAutocomplete
             label={t('propertyDetail.streetAddress')}
             placeholder={t('propertyDetail.streetAddress')}
             value={form.address_line1}
-            onChangeText={(v) => setForm({ ...form, address_line1: v })}
-            leftIcon="location-outline"
-            autoCapitalize="words"
+            onChangeText={(v) => setForm((prev) => ({ ...prev, address_line1: v }))}
+            onAddressSelect={(addr: AddressComponents) => {
+              setForm((prev) => ({
+                ...prev,
+                address_line1: addr.street,
+                address_line2: addr.unit || prev.address_line2,
+                city: addr.city,
+                state: addr.state_short || addr.state,
+                zip_code: addr.zip,
+                address_lat: addr.lat,
+                address_lng: addr.lng,
+              }));
+            }}
           />
           <Input
             label={t('propertyDetail.addressLine2')}

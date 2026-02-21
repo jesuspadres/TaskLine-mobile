@@ -28,6 +28,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useOfflineData } from '@/hooks/useOfflineData';
 import { useOfflineMutation } from '@/hooks/useOfflineMutation';
+import { invalidateCache, updateCacheData } from '@/lib/offlineStorage';
 import { secureLog } from '@/lib/security';
 import { ENV } from '@/lib/env';
 import { useSubscription } from '@/hooks/useSubscription';
@@ -290,6 +291,7 @@ export default function ProjectDetailScreen() {
         }, { onConflict: 'project_id,property_id' });
 
       if (error) throw error;
+      await invalidateCache(`project_detail:${id}`);
       showToast('success', t('projectDetail.propertyLinked'));
       setShowLocationPicker(false);
       refresh();
@@ -317,6 +319,7 @@ export default function ProjectDetailScreen() {
                 .eq('project_id', id!)
                 .eq('property_id', propertyId);
               if (error) throw error;
+              await invalidateCache(`project_detail:${id}`);
               showToast('success', t('projectDetail.propertyUnlinked'));
               refresh();
             } catch (error: any) {
@@ -404,7 +407,7 @@ export default function ProjectDetailScreen() {
         },
         matchColumn: 'id',
         matchValue: project.id,
-        cacheKeys: [`project_detail:${id}`],
+        cacheKeys: [`project_detail:${id}`, 'projects'],
       });
 
       if (error) throw error;
@@ -435,7 +438,7 @@ export default function ProjectDetailScreen() {
         data: { project_stage: newStage },
         matchColumn: 'id',
         matchValue: project.id,
-        cacheKeys: [`project_detail:${id}`],
+        cacheKeys: [`project_detail:${id}`, 'projects'],
       });
       if (error) throw error;
       refresh();
@@ -470,6 +473,9 @@ export default function ProjectDetailScreen() {
               });
 
               if (error) throw error;
+              await updateCacheData<any[]>('projects', (cached) =>
+                (cached ?? []).filter((p: any) => p.id !== project.id)
+              );
               showToast('success', t('projectDetail.projectArchived'));
               router.back();
             } catch (error: any) {
@@ -502,7 +508,7 @@ export default function ProjectDetailScreen() {
                 operation: 'delete',
                 matchColumn: 'project_id',
                 matchValue: project.id,
-                cacheKeys: [`project_detail:${id}`],
+                cacheKeys: [`project_detail:${id}`, 'tasks'],
               });
 
               if (tasksError) throw tasksError;
@@ -517,6 +523,9 @@ export default function ProjectDetailScreen() {
 
               if (error) throw error;
 
+              await updateCacheData<any[]>('projects', (cached) =>
+                (cached ?? []).filter((p: any) => p.id !== project.id)
+              );
               showToast('success', t('projectDetail.projectDeleted'));
               router.back();
             } catch (error: any) {
@@ -557,6 +566,7 @@ export default function ProjectDetailScreen() {
         message: `${t('projectDetail.approvalShareMessage', { projectName: project.name, clientName: client.name })}\n\n${approvalUrl}`,
       });
 
+      await invalidateCache('projects');
       refresh();
       showToast('success', t('projectDetail.approvalSent'));
     } catch (error: any) {
@@ -576,7 +586,7 @@ export default function ProjectDetailScreen() {
         data: { status: newStatus },
         matchColumn: 'id',
         matchValue: task.id,
-        cacheKeys: [`project_detail:${id}`],
+        cacheKeys: [`project_detail:${id}`, 'tasks'],
       });
 
       if (error) throw error;
@@ -629,7 +639,7 @@ export default function ProjectDetailScreen() {
           due_date: taskForm.due_date?.toISOString().split('T')[0] || null,
           status: 'pending',
         },
-        cacheKeys: [`project_detail:${id}`],
+        cacheKeys: [`project_detail:${id}`, 'tasks'],
       });
 
       if (error) throw error;
@@ -661,7 +671,7 @@ export default function ProjectDetailScreen() {
                 operation: 'delete',
                 matchColumn: 'id',
                 matchValue: task.id,
-                cacheKeys: [`project_detail:${id}`],
+                cacheKeys: [`project_detail:${id}`, 'tasks'],
               });
               if (error) throw error;
               refresh();
@@ -713,7 +723,7 @@ export default function ProjectDetailScreen() {
         table: 'tasks',
         operation: 'insert',
         data: tasksToAdd,
-        cacheKeys: [`project_detail:${id}`],
+        cacheKeys: [`project_detail:${id}`, 'tasks'],
       });
       if (error) throw error;
 

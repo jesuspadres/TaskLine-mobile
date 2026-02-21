@@ -49,7 +49,8 @@
       "Bash(npx eas build:*)",
       "Bash(npx eas submit:*)",
       "mcp__supabase__list_projects",
-      "Bash(xargs -I {} bash -c 'file=\"\"{}\"\"; line_num=$\\(echo \"\"$file\"\" | grep -o \"\":[0-9]*:\"\" | tr -d \"\":\"\"\\); file_path=$\\(echo \"\"$file\"\" | cut -d: -f1\\); if [ ! -z \"\"$line_num\"\" ]; then sed -n \"\"$\\(\\(line_num-2\\)\\),$\\(\\(line_num+8\\)\\)p\"\" \"\"$file_path\"\" | grep -E \"\"\\(color.*colors\\\\.|style=.*\\\\{.*color\\)\"\" | grep -v \"\"fff\\\\|white\\\\|rgba\\(255\"\"; fi')"
+      "Bash(xargs -I {} bash -c 'file=\"\"{}\"\"; line_num=$\\(echo \"\"$file\"\" | grep -o \"\":[0-9]*:\"\" | tr -d \"\":\"\"\\); file_path=$\\(echo \"\"$file\"\" | cut -d: -f1\\); if [ ! -z \"\"$line_num\"\" ]; then sed -n \"\"$\\(\\(line_num-2\\)\\),$\\(\\(line_num+8\\)\\)p\"\" \"\"$file_path\"\" | grep -E \"\"\\(color.*colors\\\\.|style=.*\\\\{.*color\\)\"\" | grep -v \"\"fff\\\\|white\\\\|rgba\\(255\"\"; fi')",
+      "Bash(git check-ignore:*)"
     ]
   }
 }
