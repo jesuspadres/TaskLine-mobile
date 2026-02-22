@@ -28,12 +28,14 @@ import {
 
 interface NotificationPrefs {
   notify_new_request: boolean;
+  notify_new_booking: boolean;
   notify_request_updates: boolean;
   notify_project_updates: boolean;
   notify_task_updates: boolean;
   notify_comments: boolean;
   notify_mentions: boolean;
   email_new_request: boolean;
+  email_new_booking: boolean;
   email_request_updates: boolean;
   email_project_updates: boolean;
   email_task_updates: boolean;
@@ -42,12 +44,14 @@ interface NotificationPrefs {
 
 const DEFAULT_PREFS: NotificationPrefs = {
   notify_new_request: true,
+  notify_new_booking: true,
   notify_request_updates: true,
   notify_project_updates: true,
   notify_task_updates: true,
   notify_comments: true,
   notify_mentions: true,
   email_new_request: true,
+  email_new_booking: true,
   email_request_updates: true,
   email_project_updates: true,
   email_task_updates: true,
@@ -62,6 +66,7 @@ interface ToggleItem {
 
 const IN_APP_ITEMS: ToggleItem[] = [
   { key: 'notify_new_request', icon: 'mail-unread-outline', i18nKey: 'notificationSettings.newRequest' },
+  { key: 'notify_new_booking', icon: 'calendar-outline', i18nKey: 'notificationSettings.newBooking' },
   { key: 'notify_request_updates', icon: 'refresh-outline', i18nKey: 'notificationSettings.requestUpdates' },
   { key: 'notify_project_updates', icon: 'folder-outline', i18nKey: 'notificationSettings.projectUpdates' },
   { key: 'notify_task_updates', icon: 'checkbox-outline', i18nKey: 'notificationSettings.taskUpdates' },
@@ -71,6 +76,7 @@ const IN_APP_ITEMS: ToggleItem[] = [
 
 const EMAIL_ITEMS: ToggleItem[] = [
   { key: 'email_new_request', icon: 'mail-outline', i18nKey: 'notificationSettings.newRequest' },
+  { key: 'email_new_booking', icon: 'calendar-outline', i18nKey: 'notificationSettings.newBooking' },
   { key: 'email_request_updates', icon: 'refresh-outline', i18nKey: 'notificationSettings.requestUpdates' },
   { key: 'email_project_updates', icon: 'folder-outline', i18nKey: 'notificationSettings.projectUpdates' },
   { key: 'email_task_updates', icon: 'checkbox-outline', i18nKey: 'notificationSettings.taskUpdates' },
@@ -157,12 +163,14 @@ export default function NotificationSettingsScreen() {
         if (!error && data) {
           setPrefs({
             notify_new_request: data.notify_new_request ?? true,
+            notify_new_booking: data.notify_new_booking ?? true,
             notify_request_updates: data.notify_request_updates ?? true,
             notify_project_updates: data.notify_project_updates ?? true,
             notify_task_updates: data.notify_task_updates ?? true,
             notify_comments: data.notify_comments ?? true,
             notify_mentions: data.notify_mentions ?? true,
             email_new_request: data.email_new_request ?? true,
+            email_new_booking: data.email_new_booking ?? true,
             email_request_updates: data.email_request_updates ?? true,
             email_project_updates: data.email_project_updates ?? true,
             email_task_updates: data.email_task_updates ?? true,

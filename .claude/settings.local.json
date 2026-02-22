@@ -50,7 +50,14 @@
       "Bash(npx eas submit:*)",
       "mcp__supabase__list_projects",
       "Bash(xargs -I {} bash -c 'file=\"\"{}\"\"; line_num=$\\(echo \"\"$file\"\" | grep -o \"\":[0-9]*:\"\" | tr -d \"\":\"\"\\); file_path=$\\(echo \"\"$file\"\" | cut -d: -f1\\); if [ ! -z \"\"$line_num\"\" ]; then sed -n \"\"$\\(\\(line_num-2\\)\\),$\\(\\(line_num+8\\)\\)p\"\" \"\"$file_path\"\" | grep -E \"\"\\(color.*colors\\\\.|style=.*\\\\{.*color\\)\"\" | grep -v \"\"fff\\\\|white\\\\|rgba\\(255\"\"; fi')",
-      "Bash(git check-ignore:*)"
+      "Bash(git check-ignore:*)",
+      "Bash(wc:*)",
+      "Bash(npx jest --no-coverage)",
+      "Bash(npm ls:*)",
+      "Bash(npx jest:*)",
+      "Bash(for f in __tests__/screens/invoices.test.tsx __tests__/screens/tasks.test.tsx __tests__/screens/projects.test.tsx __tests__/screens/notifications.test.tsx __tests__/screens/clients.test.tsx __tests__/screens/dashboard.test.tsx __tests__/screens/signup.test.tsx)",
+      "Bash(do sed -i 's/getByTestID/getByTestId/g' \"$f\")",
+      "Bash(done)"
     ]
   }
 }
