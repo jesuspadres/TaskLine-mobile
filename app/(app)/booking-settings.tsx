@@ -47,6 +47,8 @@ interface SchedulingSettings {
   reminder_email_enabled: boolean;
   reminder_sms_enabled: boolean;
   reminder_message: string;
+  booking_location: string;
+  show_booking_location: boolean;
 }
 
 interface AvailabilityRule {
@@ -165,6 +167,8 @@ const DEFAULT_SETTINGS: SchedulingSettings = {
   reminder_email_enabled: true,
   reminder_sms_enabled: false,
   reminder_message: '',
+  booking_location: '',
+  show_booking_location: true,
 };
 
 function getDefaultAvailability(): AvailabilityRule[] {
@@ -280,6 +284,8 @@ export default function BookingSettingsScreen() {
           reminder_email_enabled: settingsData.reminder_email_enabled ?? DEFAULT_SETTINGS.reminder_email_enabled,
           reminder_sms_enabled: settingsData.reminder_sms_enabled ?? DEFAULT_SETTINGS.reminder_sms_enabled,
           reminder_message: settingsData.reminder_message ?? DEFAULT_SETTINGS.reminder_message,
+          booking_location: settingsData.booking_location ?? DEFAULT_SETTINGS.booking_location,
+          show_booking_location: settingsData.show_booking_location ?? DEFAULT_SETTINGS.show_booking_location,
         });
       }
 
@@ -384,6 +390,8 @@ export default function BookingSettingsScreen() {
           reminder_email_enabled: settings.reminder_email_enabled,
           reminder_sms_enabled: settings.reminder_sms_enabled,
           reminder_message: settings.reminder_message || null,
+          booking_location: settings.booking_location || null,
+          show_booking_location: settings.show_booking_location,
           updated_at: new Date().toISOString(),
         } as any,
         { onConflict: 'user_id' }
@@ -929,8 +937,45 @@ export default function BookingSettingsScreen() {
               {renderSwitchRow(
                 t('bookingSettings.allowClientEdits'),
                 settings.allow_client_edits,
-                (v) => updateSetting('allow_client_edits', v),
-                true
+                (v) => updateSetting('allow_client_edits', v)
+              )}
+
+              {/* Show booking location toggle */}
+              <View style={[styles.switchRow, !settings.show_booking_location && { borderBottomWidth: 0 }]}>
+                <View style={{ flex: 1, marginRight: Spacing.sm }}>
+                  <Text style={[styles.switchLabel, { color: colors.text }]}>
+                    {t('bookingSettings.showBookingLocation')}
+                  </Text>
+                  <Text style={{ fontSize: FontSizes.xs, color: colors.textSecondary, marginTop: 2 }}>
+                    {t('bookingSettings.showBookingLocationDesc')}
+                  </Text>
+                </View>
+                <Switch
+                  value={settings.show_booking_location}
+                  onValueChange={(v) => updateSetting('show_booking_location', v)}
+                  trackColor={{ false: colors.border, true: colors.primary + '60' }}
+                  thumbColor={settings.show_booking_location ? colors.primary : colors.surface}
+                />
+              </View>
+
+              {settings.show_booking_location && (
+                <View style={[styles.reminderMessageContainer, { borderTopColor: colors.borderLight }]}>
+                  <Text style={[styles.inputLabel, { color: colors.text, marginBottom: Spacing.xs }]}>
+                    {t('bookingSettings.bookingLocation')}
+                  </Text>
+                  <View style={[styles.inputWrapper, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+                    <TextInput
+                      style={[styles.input, { color: colors.text }]}
+                      value={settings.booking_location}
+                      onChangeText={(v) => updateSetting('booking_location', v)}
+                      placeholder={t('bookingSettings.bookingLocationPlaceholder')}
+                      placeholderTextColor={colors.textTertiary}
+                    />
+                  </View>
+                  <Text style={{ fontSize: FontSizes.xs, color: colors.textTertiary, marginTop: 4 }}>
+                    {t('bookingSettings.bookingLocationFallback')}
+                  </Text>
+                </View>
               )}
             </View>
           )}
