@@ -25,6 +25,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useNavigationBadges } from '@/hooks/useNavigationBadges';
 import { useSubscription } from '@/hooks/useSubscription';
+import { useTutorial } from '@/hooks/useTutorial';
 import { ENV } from '@/lib/env';
 import { getPlan } from '@/lib/plans';
 import { showToast, ConfirmDialog, DatePicker } from '@/components';
@@ -65,6 +66,7 @@ export default function SettingsScreen() {
   const { t, locale, setLocale } = useTranslations();
   const { counts } = useNavigationBadges();
   const subscription = useSubscription();
+  useTutorial('settings');
   const { tier } = subscription;
   const [loading, setLoading] = useState(false);
   const [notifications, setNotifications] = useState(true);
@@ -664,6 +666,14 @@ export default function SettingsScreen() {
     {
       title: t('settings.support'),
       items: [
+        {
+          id: 'tutorials',
+          icon: 'school-outline',
+          title: t('settings.helpTutorials'),
+          subtitle: t('settings.helpTutorialsSubtitle'),
+          type: 'link',
+          onPress: () => router.push('/(app)/help-tutorials' as any),
+        },
         {
           id: 'help',
           icon: 'help-circle-outline',

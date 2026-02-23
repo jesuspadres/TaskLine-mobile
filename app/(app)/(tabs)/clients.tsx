@@ -18,6 +18,7 @@ import { useCollapsibleFilters } from '@/hooks/useCollapsibleFilters';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useOfflineData } from '@/hooks/useOfflineData';
 import { useOfflineMutation } from '@/hooks/useOfflineMutation';
+import { useTutorial } from '@/hooks/useTutorial';
 import {
   SearchBar, FilterChips, Badge, Avatar, EmptyState,
   Modal, Input, Button, ListSkeleton, showToast,
@@ -32,6 +33,7 @@ export default function ClientsScreen() {
   const { user } = useAuthStore();
   const { colors } = useTheme();
   const { t, locale } = useTranslations();
+  useTutorial('clients');
   const router = useRouter();
   const { create } = useLocalSearchParams<{ create?: string }>();
   const { filterContainerStyle, onFilterLayout, onScroll, filterHeight } = useCollapsibleFilters();

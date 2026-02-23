@@ -38,6 +38,7 @@ export default function AppLayout() {
       <Stack.Screen name="stripe-payments" />
       <Stack.Screen name="ai-settings" />
       <Stack.Screen name="storage-management" />
+      <Stack.Screen name="help-tutorials" />
     </Stack>
   );
 }

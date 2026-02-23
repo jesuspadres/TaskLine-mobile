@@ -19,6 +19,7 @@ import { useCollapsibleFilters } from '@/hooks/useCollapsibleFilters';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useOfflineData } from '@/hooks/useOfflineData';
 import { useOfflineMutation } from '@/hooks/useOfflineMutation';
+import { useTutorial } from '@/hooks/useTutorial';
 import {
   SearchBar, FilterChips, Badge, Avatar, EmptyState,
   Modal, Input, Button, Select, DatePicker, ListSkeleton,
@@ -33,6 +34,7 @@ export default function ProjectsScreen() {
   const { create, filter } = useLocalSearchParams<{ create?: string; filter?: string }>();
   const { user } = useAuthStore();
   const { colors } = useTheme();
+  useTutorial('projects');
   const { t, locale } = useTranslations();
   const { filterContainerStyle, onFilterLayout, onScroll, filterHeight } = useCollapsibleFilters();
 

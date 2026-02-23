@@ -26,6 +26,7 @@ import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useOfflineData } from '@/hooks/useOfflineData';
 import { useOfflineMutation } from '@/hooks/useOfflineMutation';
+import { useTutorial } from '@/hooks/useTutorial';
 import { invalidateCache } from '@/lib/offlineStorage';
 import {
   Modal, Input, Button, Select, DatePicker, EmptyState,
@@ -108,6 +109,7 @@ export default function InvoicesScreen() {
   const { colors } = useTheme();
   const { t, locale } = useTranslations();
   const haptics = useHaptics();
+  useTutorial('invoices');
   const { filterContainerStyle, onFilterLayout, onScroll, filterHeight } = useCollapsibleFilters();
 
   const { data: invoices, loading, refreshing, isOffline, refresh } = useOfflineData<InvoiceRow[]>(

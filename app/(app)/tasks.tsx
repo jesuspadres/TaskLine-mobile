@@ -21,6 +21,7 @@ import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useOfflineData } from '@/hooks/useOfflineData';
 import { useOfflineMutation } from '@/hooks/useOfflineMutation';
+import { useTutorial } from '@/hooks/useTutorial';
 import { updateCacheData } from '@/lib/offlineStorage';
 import {
   Modal, Input, Button, Select, DatePicker, EmptyState,
@@ -43,6 +44,7 @@ export default function TasksScreen() {
   const router = useRouter();
   const { create, id: openTaskId } = useLocalSearchParams<{ create?: string; id?: string }>();
   const { user } = useAuthStore();
+  useTutorial('tasks');
   const { colors } = useTheme();
   const { t, locale } = useTranslations();
   const haptics = useHaptics();

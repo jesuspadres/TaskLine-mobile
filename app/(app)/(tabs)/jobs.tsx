@@ -22,6 +22,7 @@ import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useOfflineData } from '@/hooks/useOfflineData';
 import { useOfflineMutation } from '@/hooks/useOfflineMutation';
+import { useTutorial } from '@/hooks/useTutorial';
 import { invalidateCache, updateCacheData } from '@/lib/offlineStorage';
 import { ENV } from '@/lib/env';
 import {
@@ -90,6 +91,7 @@ export default function JobsScreen() {
   const { user } = useAuthStore();
   const { colors, isDark } = useTheme();
   const { t, locale } = useTranslations();
+  useTutorial('jobs');
   const router = useRouter();
   const haptics = useHaptics();
   const dateLocale = locale === 'es' ? 'es-MX' : 'en-US';

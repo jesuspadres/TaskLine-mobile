@@ -938,6 +938,8 @@
     "invoiceSettings": "Invoice Settings",
     "invoicePaymentSettings": "Invoice & Payment Settings",
     "invoicePaymentSettingsSubtitle": "Default payment terms",
+    "helpTutorials": "Help & Tutorials",
+    "helpTutorialsSubtitle": "Learn how to use each feature",
     "helpCenter": "Help Center",
     "helpCenterSubtitle": "Get help and support",
     "sendFeedback": "Send Feedback",
@@ -1909,5 +1911,284 @@
     "manageBillingHint": "Update payment method, view billing history, and download invoices",
     "manageOnWeb": "Manage on Website",
     "freePlanMessage": "You're on the free plan. Upgrade to unlock more clients, projects, storage, and premium features."
+  },
+  "tutorials": {
+    "common": {
+      "stepOf": "Step %{current} of %{total}",
+      "next": "Next",
+      "skip": "Skip",
+      "done": "Done"
+    },
+    "categories": {
+      "gettingStarted": "Getting Started",
+      "management": "Management",
+      "financial": "Financial",
+      "scheduling": "Scheduling",
+      "settings": "Settings & Preferences",
+      "tierUpgrade": "New Features"
+    },
+    "helpScreen": {
+      "title": "Help & Tutorials",
+      "subtitle": "Learn how to use each feature",
+      "enableTutorials": "Enable Tutorials",
+      "enableTutorialsSubtitle": "Show guides when visiting screens for the first time",
+      "resetAll": "Reset All Tutorials",
+      "resetAllConfirm": "This will mark all tutorials as unseen. You'll see them again when visiting each screen.",
+      "resetSuccess": "All tutorials have been reset",
+      "completed": "Completed",
+      "notStarted": "Not started",
+      "upgradeRequired": "Upgrade to %{tier} to unlock",
+      "replay": "Tap to replay"
+    },
+    "dashboard": {
+      "name": "Dashboard Overview",
+      "step1": {
+        "title": "Welcome to Your Dashboard",
+        "description": "This is your command center. Get a quick overview of your business — clients, projects, tasks, and revenue at a glance."
+      },
+      "step2": {
+        "title": "Track Your Stats",
+        "description": "See real-time counts of your clients, active projects, and completed tasks. Stats update automatically as you work."
+      },
+      "step3": {
+        "title": "Critical Alerts",
+        "description": "Important items that need attention appear here — overdue invoices, pending approvals, and upcoming deadlines."
+      },
+      "step4": {
+        "title": "Quick Actions",
+        "description": "Use the quick action buttons to jump directly to adding new clients, projects, or tasks without navigating away."
+      }
+    },
+    "clients": {
+      "name": "Managing Clients",
+      "step1": {
+        "title": "Your Client List",
+        "description": "All your clients are organized here. Each card shows the client name, email, and onboarding status."
+      },
+      "step2": {
+        "title": "Search & Filter",
+        "description": "Use the search bar to find clients by name or email. Filter by status to quickly find active or pending clients."
+      },
+      "step3": {
+        "title": "Add New Clients",
+        "description": "Tap the + button to create a new client record. Add their contact details, company info, and notes."
+      },
+      "step4": {
+        "title": "Client Details",
+        "description": "Tap any client to view their full profile, linked projects, invoices, and properties."
+      }
+    },
+    "projects": {
+      "name": "Project Management",
+      "step1": {
+        "title": "Your Projects",
+        "description": "Manage all your projects in one place. Each project is linked to a client and tracks budget, timeline, and progress."
+      },
+      "step2": {
+        "title": "Filter by Status",
+        "description": "Use the filter chips to view projects by stage — planning, in progress, completed, or archived."
+      },
+      "step3": {
+        "title": "Create Projects",
+        "description": "Start a new project by tapping the + button. Assign a client, set a budget, deadline, and project stage."
+      },
+      "step4": {
+        "title": "Track Progress",
+        "description": "Open a project to see its tasks, invoices, and line items. Monitor completion and budget usage."
+      }
+    },
+    "tasks": {
+      "name": "Task Tracking",
+      "step1": {
+        "title": "Your Tasks",
+        "description": "View and manage all tasks across your projects. Each task shows its priority, status, and linked project."
+      },
+      "step2": {
+        "title": "Priority Levels",
+        "description": "Tasks are color-coded by priority — red for high, yellow for medium, green for low. Focus on what matters most."
+      },
+      "step3": {
+        "title": "Filter & Sort",
+        "description": "Filter tasks by status (backlog, pending, in progress, completed) or sort by date and name."
+      },
+      "step4": {
+        "title": "Add Tasks",
+        "description": "Create new tasks and assign them to projects. Set priority, status, and due dates to stay organized."
+      }
+    },
+    "requests": {
+      "name": "Service Requests",
+      "step1": {
+        "title": "Your Request Inbox",
+        "description": "Service requests from clients appear here. Each request includes the client's message, budget, and details."
+      },
+      "step2": {
+        "title": "Review Requests",
+        "description": "Tap a request to see the full details, view attached files, and check the client's information."
+      },
+      "step3": {
+        "title": "Respond & Communicate",
+        "description": "Send messages back to clients directly through the request thread. Keep all communication in one place."
+      },
+      "step4": {
+        "title": "Convert to Projects",
+        "description": "When you're ready, approve a request to convert it into a project linked to the client automatically."
+      }
+    },
+    "invoices": {
+      "name": "Invoice Management",
+      "step1": {
+        "title": "Your Invoices",
+        "description": "Track all your invoices in one place. See status, amounts, due dates, and which client each invoice belongs to."
+      },
+      "step2": {
+        "title": "Create Invoices",
+        "description": "Generate professional invoices linked to projects. Add line items, tax rates, and payment terms."
+      },
+      "step3": {
+        "title": "Send to Clients",
+        "description": "Send invoices directly to clients via email. They'll receive a professional PDF with payment instructions."
+      },
+      "step4": {
+        "title": "Track Payments",
+        "description": "Mark invoices as paid or overdue. Monitor your revenue and outstanding balances from the dashboard."
+      }
+    },
+    "bookings": {
+      "name": "Booking Management",
+      "step1": {
+        "title": "Your Bookings",
+        "description": "View and manage scheduled appointments. See upcoming, confirmed, and cancelled bookings in one place."
+      },
+      "step2": {
+        "title": "Booking Details",
+        "description": "Each booking shows the time, client, and status. Tap to see full details and manage the appointment."
+      },
+      "step3": {
+        "title": "Stay Notified",
+        "description": "You'll receive notifications for new bookings, cancellations, and upcoming appointments automatically."
+      }
+    },
+    "calendar": {
+      "name": "Calendar View",
+      "step1": {
+        "title": "Your Calendar",
+        "description": "See all your bookings, tasks, and deadlines on a visual calendar. Dates with events are marked with colored dots."
+      },
+      "step2": {
+        "title": "Day View",
+        "description": "Tap any date to see the events for that day. Tasks, bookings, and deadlines are listed with times and details."
+      },
+      "step3": {
+        "title": "Plan Ahead",
+        "description": "Navigate between months to plan your schedule. Color-coded dots help you identify different event types at a glance."
+      }
+    },
+    "properties": {
+      "name": "Property Management",
+      "step1": {
+        "title": "Your Properties",
+        "description": "Track properties associated with your clients. Add addresses, details, and access codes for each property."
+      },
+      "step2": {
+        "title": "Property Details",
+        "description": "Tap a property to see its full address, linked client, and details. View the location on a map."
+      },
+      "step3": {
+        "title": "Link to Clients",
+        "description": "Each property is connected to a client. When viewing a client, you can see all their associated properties."
+      }
+    },
+    "notifications": {
+      "name": "Notification Center",
+      "step1": {
+        "title": "Your Notifications",
+        "description": "Stay up to date with all activity. New requests, project updates, invoice payments, and more appear here."
+      },
+      "step2": {
+        "title": "Mark as Read",
+        "description": "Tap a notification to mark it as read. Use bulk actions to mark all as read or archive old notifications."
+      },
+      "step3": {
+        "title": "Customize Preferences",
+        "description": "Control which notifications you receive by visiting Settings > Notification Preferences."
+      }
+    },
+    "settingsGuide": {
+      "name": "App Settings",
+      "step1": {
+        "title": "Your Account",
+        "description": "Edit your profile, change email or password, and manage notification preferences from the Account section."
+      },
+      "step2": {
+        "title": "Appearance & Language",
+        "description": "Switch between light, dark, or system theme. Change the app language between English and Spanish."
+      },
+      "step3": {
+        "title": "Business Settings",
+        "description": "Configure your business profile, invoice settings, booking availability, QR codes, and payment integrations."
+      },
+      "step4": {
+        "title": "Subscription & Plan",
+        "description": "View your current plan, manage your subscription, and explore upgrade options for more features."
+      }
+    },
+    "upgradePro": {
+      "name": "Welcome to Pro!",
+      "step1": {
+        "title": "Unlimited Clients & Projects",
+        "description": "You now have no limits on clients, projects, and tasks. Scale your business without restrictions."
+      },
+      "step2": {
+        "title": "Scheduler Unlocked",
+        "description": "Set your availability and let clients book appointments through your scheduling page."
+      },
+      "step3": {
+        "title": "5GB Storage",
+        "description": "Upload files and attachments with up to 5GB of cloud storage. Attach documents to invoices and projects."
+      },
+      "step4": {
+        "title": "Priority Support",
+        "description": "Get faster responses from our support team. Your requests are now prioritized."
+      }
+    },
+    "upgradePlus": {
+      "name": "Welcome to Plus!",
+      "step1": {
+        "title": "SMS Notifications",
+        "description": "Send text message reminders to clients for bookings, invoices, and project updates."
+      },
+      "step2": {
+        "title": "Payment Processing",
+        "description": "Accept payments directly through invoices with Stripe integration. Get paid faster."
+      },
+      "step3": {
+        "title": "Product Catalog",
+        "description": "Create and manage a catalog of services and products. Add them quickly to invoices and estimates."
+      },
+      "step4": {
+        "title": "AI Assistant",
+        "description": "Get AI-powered suggestions for project descriptions, invoice notes, and client communications."
+      }
+    },
+    "upgradeBusiness": {
+      "name": "Welcome to Business!",
+      "step1": {
+        "title": "Team Members",
+        "description": "Invite team members to collaborate on projects, manage clients, and handle tasks together."
+      },
+      "step2": {
+        "title": "Phone Support",
+        "description": "Get direct phone support from our team. Available during business hours for urgent issues."
+      },
+      "step3": {
+        "title": "White-Label Branding",
+        "description": "Customize the client portal with your brand colors, logo, and domain. Make it fully yours."
+      },
+      "step4": {
+        "title": "100GB Storage",
+        "description": "Massive storage for all your files, documents, and media. Never worry about running out of space."
+      }
+    }
   }
 }

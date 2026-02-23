@@ -18,6 +18,7 @@ import { EmptyState, ListSkeleton } from '@/components';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useOfflineData } from '@/hooks/useOfflineData';
+import { useTutorial } from '@/hooks/useTutorial';
 
 interface CalendarEvent {
   id: string;
@@ -38,6 +39,7 @@ export default function CalendarScreen() {
   const { colors, isDark } = useTheme();
   const { t, locale } = useTranslations();
   const router = useRouter();
+  useTutorial('calendar');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(
     new Date().toISOString().split('T')[0]

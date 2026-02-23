@@ -15,6 +15,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { useCollapsibleFilters } from '@/hooks/useCollapsibleFilters';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useTranslations } from '@/hooks/useTranslations';
+import { useTutorial } from '@/hooks/useTutorial';
 import { FilterChips, EmptyState, ConfirmDialog, showToast } from '@/components';
 import { useOfflineStore } from '@/stores/offlineStore';
 import { Spacing, FontSizes, BorderRadius, Shadows } from '@/constants/theme';
@@ -245,6 +246,7 @@ export default function NotificationsScreen() {
   const { colors } = useTheme();
   const router = useRouter();
   const { t } = useTranslations();
+  useTutorial('notifications');
   const { filterContainerStyle, onFilterLayout, onScroll, filterHeight } = useCollapsibleFilters();
   const {
     notifications,

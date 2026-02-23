@@ -22,6 +22,7 @@ import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useOfflineData } from '@/hooks/useOfflineData';
 import { useOfflineMutation } from '@/hooks/useOfflineMutation';
+import { useTutorial } from '@/hooks/useTutorial';
 import * as Haptics from 'expo-haptics';
 import {
   SearchBar,
@@ -98,6 +99,7 @@ export default function PropertiesScreen() {
   const { colors } = useTheme();
   const { t } = useTranslations();
   const haptics = useHaptics();
+  useTutorial('properties');
   const { filterContainerStyle, onFilterLayout, onScroll, filterHeight } = useCollapsibleFilters();
   const { data: properties, loading, refreshing, isOffline, refresh } = useOfflineData<PropertyWithClient[]>(
     'properties',

@@ -15,6 +15,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useOfflineData } from '@/hooks/useOfflineData';
+import { useTutorial } from '@/hooks/useTutorial';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { NotificationBell, CriticalAlertsCard, StatsSkeleton, ListSkeleton, StatusBadge, showToast } from '@/components';
 import type { RequestWithClient, TaskWithProject, ProjectWithRelations } from '@/lib/database.types';
@@ -59,6 +60,7 @@ export default function DashboardScreen() {
   const { user } = useAuthStore();
   const { colors, isDark } = useTheme();
   const { t, locale } = useTranslations();
+  useTutorial('dashboard');
   const router = useRouter();
   interface DashboardData {
     stats: DashboardStats;

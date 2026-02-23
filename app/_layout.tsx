@@ -13,6 +13,7 @@ import { ToastProvider } from '@/components/Toast';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { OfflineBanner } from '@/components/OfflineBanner';
 import { LoadingOverlayProvider } from '@/components/LoadingOverlay';
+import { TutorialProvider } from '@/components/TutorialOverlay';
 import { ENV } from '@/lib/env';
 
 Sentry.init({
@@ -86,14 +87,16 @@ function RootLayout() {
     <ErrorBoundary>
       <ToastProvider>
         <LoadingOverlayProvider>
-          <StatusBar style={isDark ? 'light' : 'dark'} />
-          <View style={{ flex: 1 }}>
-            <OfflineBanner />
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-              <Stack.Screen name="(app)" options={{ headerShown: false }} />
-            </Stack>
-          </View>
+          <TutorialProvider>
+            <StatusBar style={isDark ? 'light' : 'dark'} />
+            <View style={{ flex: 1 }}>
+              <OfflineBanner />
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+                <Stack.Screen name="(app)" options={{ headerShown: false }} />
+              </Stack>
+            </View>
+          </TutorialProvider>
         </LoadingOverlayProvider>
       </ToastProvider>
     </ErrorBoundary>

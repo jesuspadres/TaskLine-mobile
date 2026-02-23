@@ -938,6 +938,8 @@
     "invoiceSettings": "Configuracion de facturas",
     "invoicePaymentSettings": "Facturas y pagos",
     "invoicePaymentSettingsSubtitle": "Terminos de pago predeterminados",
+    "helpTutorials": "Ayuda y Tutoriales",
+    "helpTutorialsSubtitle": "Aprende a usar cada función",
     "helpCenter": "Centro de ayuda",
     "helpCenterSubtitle": "Obtener ayuda y soporte",
     "sendFeedback": "Enviar comentarios",
@@ -1806,72 +1808,72 @@
     "saved": "Configuracion SMS guardada"
   },
   "aiSettings": {
-    "title": "Asistente de IA",
-    "description": "La IA te ayuda a gestionar tu negocio analizando solicitudes, sugiriendo respuestas y automatizando tareas rutinarias.",
+    "title": "Asistente IA",
+    "description": "Deja que la IA te ayude a analizar solicitudes, redactar respuestas y crear proyectos",
     "plusRequired": "Se requiere plan Plus",
     "plusRequiredSubtitle": "Las funciones de IA están disponibles en los planes Plus y Business.",
-    "upgrade": "Mejorar plan",
-    "enableAi": "Activar asistente de IA",
-    "enableAiDesc": "Permitir que la IA ayude a gestionar tu negocio",
-    "automationMode": "Modo de automatizacion",
+    "upgrade": "Mejorar a Plus",
+    "enableAi": "Asistente IA Activado",
+    "enableAiDesc": "Cuando está activado, la IA analizará tus solicitudes entrantes",
+    "automationMode": "Modo de Automatización",
     "modeOff": "Desactivado - Solo manual",
-    "modeOffDesc": "La IA no analizara solicitudes automaticamente. Aun puedes activar el analisis manualmente.",
-    "modeAdvise": "Analizar y asesorar",
-    "modeAdviseDesc": "La IA analiza solicitudes y sugiere acciones para tu revision",
-    "modeAutoCreate": "Auto-crear proyectos",
-    "modeAutoCreateDesc": "La IA crea automaticamente borradores de proyectos a partir de solicitudes",
-    "autoRespond": "Responder automaticamente a clientes",
-    "autoRespondDesc": "La IA envia preguntas de seguimiento a los clientes automaticamente cuando llega una nueva solicitud",
-    "customInstructions": "Instrucciones personalizadas",
-    "customInstructionsDesc": "La IA usara esto junto con tus servicios, proyectos y datos de clientes para un mejor analisis.",
-    "customInstructionsPlaceholder": "Cuéntale a la IA sobre tu negocio, precios, especialidades y reglas a seguir...",
-    "saved": "Configuracion de IA guardada"
+    "modeOffDesc": "La IA no analizará solicitudes automáticamente. Puedes activar el análisis manualmente.",
+    "modeAdvise": "Analizar y Asesorar",
+    "modeAdviseDesc": "La IA analiza solicitudes y sugiere acciones para tu revisión",
+    "modeAutoCreate": "Crear Proyectos Automáticamente",
+    "modeAutoCreateDesc": "La IA crea propuestas de proyectos automáticamente a partir de solicitudes",
+    "autoRespond": "Responder Automáticamente a Clientes",
+    "autoRespondDesc": "La IA envía preguntas de seguimiento a los clientes automáticamente cuando llega una nueva solicitud",
+    "customInstructions": "Instrucciones Personalizadas",
+    "customInstructionsDesc": "La IA usará esto junto con tus servicios, proyectos y datos de clientes para un mejor análisis.",
+    "customInstructionsPlaceholder": "Describe tu negocio, precios, especialidades y cualquier regla a seguir...",
+    "saved": "Configuración de IA guardada exitosamente"
   },
   "ai": {
     "analyzeWithAi": "Analizar con IA",
     "analyzing": "Analizando...",
-    "draftProjectWithAi": "Borrador de proyecto con IA",
-    "draftFollowUp": "Borrador de seguimiento con IA",
-    "analysisComplete": "Analisis de IA",
+    "draftProjectWithAi": "Crear Propuesta con IA",
+    "draftFollowUp": "Mensaje de Seguimiento con IA",
+    "analysisComplete": "Análisis IA",
     "summary": "Resumen",
     "sentiment": "Sentimiento",
     "sentimentPositive": "Positivo",
     "sentimentNeutral": "Neutral",
-    "sentimentCautious": "Cauteloso",
+    "sentimentCautious": "Precaución",
     "sentimentUrgent": "Urgente",
-    "estimatedValue": "Valor est.",
+    "estimatedValue": "Valor Estimado",
     "priorityScore": "Prioridad",
-    "recommendedActions": "Acciones recomendadas",
-    "followUpQuestions": "Preguntas de seguimiento",
-    "createProject": "Crear proyecto",
-    "draftingProject": "Creando proyecto...",
-    "projectCreated": "Proyecto creado a partir del borrador de IA",
-    "sendFollowUp": "Enviar seguimiento",
-    "editAndSend": "Editar y enviar",
-    "sendingFollowUp": "Enviando...",
-    "followUpSent": "Seguimiento enviado al cliente",
-    "followUpDraft": "Borrador de seguimiento de IA",
+    "recommendedActions": "Acciones Recomendadas",
+    "followUpQuestions": "Preguntas Sugeridas",
+    "createProject": "Crear Proyecto",
+    "draftingProject": "Creando propuesta...",
+    "projectCreated": "Proyecto creado a partir de la propuesta de IA",
+    "sendFollowUp": "Enviar Seguimiento",
+    "editAndSend": "Editar y Enviar",
+    "sendingFollowUp": "Redactando...",
+    "followUpSent": "Preguntas de seguimiento enviadas al cliente",
+    "followUpDraft": "Mensaje de seguimiento con IA",
     "followUpPlaceholder": "Edita el mensaje generado por IA antes de enviar...",
-    "draftTasks": "Generar con IA",
+    "draftTasks": "Generar tareas con IA",
     "draftingTasks": "Generando tareas...",
     "addSelectedTasks": "Agregar tareas seleccionadas",
     "selectAll": "Seleccionar todo",
     "deselectAll": "Deseleccionar todo",
-    "tasksDrafted": "Tareas agregadas del borrador de IA",
+    "tasksDrafted": "Tareas agregadas de la propuesta de IA",
     "noTasksSelected": "Selecciona al menos una tarea para agregar",
-    "helpful": "Util",
-    "notHelpful": "No util",
-    "thanksFeedback": "Gracias por tu opinion",
+    "helpful": "Útil",
+    "notHelpful": "No Útil",
+    "thanksFeedback": "¡Gracias por tu retroalimentación!",
     "dismiss": "Descartar",
-    "dismissed": "Analisis descartado",
+    "dismissed": "Análisis descartado",
     "upgradeRequired": "Funciones de IA — Plan Plus",
-    "upgradeRequiredDesc": "El analisis de IA, borradores inteligentes y respuestas automaticas estan disponibles en los planes Plus y Business.",
+    "upgradeRequiredDesc": "El análisis de IA, borradores inteligentes y respuestas automáticas están disponibles en los planes Plus y Business.",
     "upgrade": "Mejorar plan",
     "analysisError": "Error al analizar la solicitud",
-    "draftError": "Error al generar el borrador",
+    "draftError": "Error al generar la propuesta",
     "respondError": "Error al generar la respuesta",
     "draftTasksError": "Error al generar las tareas",
-    "cached": "En cache"
+    "cached": "En caché"
   },
   "offline": {
     "youreOffline": "Sin conexion",
@@ -1910,5 +1912,284 @@
     "manageBillingHint": "Actualizar método de pago, ver historial de facturación y descargar facturas",
     "manageOnWeb": "Gestionar en el Sitio Web",
     "freePlanMessage": "Estás en el plan gratuito. Actualiza para desbloquear más clientes, proyectos, almacenamiento y funciones premium."
+  },
+  "tutorials": {
+    "common": {
+      "stepOf": "Paso %{current} de %{total}",
+      "next": "Siguiente",
+      "skip": "Omitir",
+      "done": "Listo"
+    },
+    "categories": {
+      "gettingStarted": "Primeros Pasos",
+      "management": "Gestión",
+      "financial": "Finanzas",
+      "scheduling": "Programación",
+      "settings": "Ajustes y Preferencias",
+      "tierUpgrade": "Nuevas Funciones"
+    },
+    "helpScreen": {
+      "title": "Ayuda y Tutoriales",
+      "subtitle": "Aprende a usar cada función",
+      "enableTutorials": "Activar Tutoriales",
+      "enableTutorialsSubtitle": "Mostrar guías al visitar pantallas por primera vez",
+      "resetAll": "Restablecer Todos los Tutoriales",
+      "resetAllConfirm": "Esto marcará todos los tutoriales como no vistos. Los verás de nuevo al visitar cada pantalla.",
+      "resetSuccess": "Todos los tutoriales han sido restablecidos",
+      "completed": "Completado",
+      "notStarted": "No iniciado",
+      "upgradeRequired": "Actualiza a %{tier} para desbloquear",
+      "replay": "Toca para repetir"
+    },
+    "dashboard": {
+      "name": "Vista General del Panel",
+      "step1": {
+        "title": "Bienvenido a tu Panel",
+        "description": "Este es tu centro de control. Obtén una vista rápida de tu negocio — clientes, proyectos, tareas e ingresos de un vistazo."
+      },
+      "step2": {
+        "title": "Sigue tus Estadísticas",
+        "description": "Ve los conteos en tiempo real de tus clientes, proyectos activos y tareas completadas. Las estadísticas se actualizan automáticamente."
+      },
+      "step3": {
+        "title": "Alertas Críticas",
+        "description": "Los elementos importantes que necesitan atención aparecen aquí — facturas vencidas, aprobaciones pendientes y plazos próximos."
+      },
+      "step4": {
+        "title": "Acciones Rápidas",
+        "description": "Usa los botones de acción rápida para agregar nuevos clientes, proyectos o tareas sin salir de esta pantalla."
+      }
+    },
+    "clients": {
+      "name": "Gestión de Clientes",
+      "step1": {
+        "title": "Tu Lista de Clientes",
+        "description": "Todos tus clientes están organizados aquí. Cada tarjeta muestra el nombre, correo y estado del cliente."
+      },
+      "step2": {
+        "title": "Buscar y Filtrar",
+        "description": "Usa la barra de búsqueda para encontrar clientes por nombre o correo. Filtra por estado para encontrar clientes activos o pendientes."
+      },
+      "step3": {
+        "title": "Agregar Nuevos Clientes",
+        "description": "Toca el botón + para crear un nuevo registro de cliente. Agrega sus datos de contacto, información de empresa y notas."
+      },
+      "step4": {
+        "title": "Detalles del Cliente",
+        "description": "Toca cualquier cliente para ver su perfil completo, proyectos vinculados, facturas y propiedades."
+      }
+    },
+    "projects": {
+      "name": "Gestión de Proyectos",
+      "step1": {
+        "title": "Tus Proyectos",
+        "description": "Gestiona todos tus proyectos en un solo lugar. Cada proyecto está vinculado a un cliente y rastrea presupuesto, plazo y progreso."
+      },
+      "step2": {
+        "title": "Filtrar por Estado",
+        "description": "Usa los filtros para ver proyectos por etapa — planificación, en progreso, completados o archivados."
+      },
+      "step3": {
+        "title": "Crear Proyectos",
+        "description": "Inicia un nuevo proyecto tocando el botón +. Asigna un cliente, establece presupuesto, fecha límite y etapa."
+      },
+      "step4": {
+        "title": "Seguir el Progreso",
+        "description": "Abre un proyecto para ver sus tareas, facturas y partidas. Monitorea el avance y uso del presupuesto."
+      }
+    },
+    "tasks": {
+      "name": "Seguimiento de Tareas",
+      "step1": {
+        "title": "Tus Tareas",
+        "description": "Ve y gestiona todas las tareas de tus proyectos. Cada tarea muestra su prioridad, estado y proyecto vinculado."
+      },
+      "step2": {
+        "title": "Niveles de Prioridad",
+        "description": "Las tareas están codificadas por color según prioridad — rojo para alta, amarillo para media, verde para baja."
+      },
+      "step3": {
+        "title": "Filtrar y Ordenar",
+        "description": "Filtra tareas por estado (pendiente, en progreso, completada) u ordena por fecha y nombre."
+      },
+      "step4": {
+        "title": "Agregar Tareas",
+        "description": "Crea nuevas tareas y asígnalas a proyectos. Establece prioridad, estado y fechas límite para mantenerte organizado."
+      }
+    },
+    "requests": {
+      "name": "Solicitudes de Servicio",
+      "step1": {
+        "title": "Tu Bandeja de Solicitudes",
+        "description": "Las solicitudes de servicio de tus clientes aparecen aquí. Cada solicitud incluye el mensaje, presupuesto y detalles del cliente."
+      },
+      "step2": {
+        "title": "Revisar Solicitudes",
+        "description": "Toca una solicitud para ver los detalles completos, archivos adjuntos e información del cliente."
+      },
+      "step3": {
+        "title": "Responder y Comunicar",
+        "description": "Envía mensajes a los clientes directamente a través del hilo de solicitud. Mantén toda la comunicación en un solo lugar."
+      },
+      "step4": {
+        "title": "Convertir en Proyectos",
+        "description": "Cuando estés listo, aprueba una solicitud para convertirla en un proyecto vinculado al cliente automáticamente."
+      }
+    },
+    "invoices": {
+      "name": "Gestión de Facturas",
+      "step1": {
+        "title": "Tus Facturas",
+        "description": "Rastrea todas tus facturas en un solo lugar. Ve estado, montos, fechas de vencimiento y a qué cliente pertenece cada factura."
+      },
+      "step2": {
+        "title": "Crear Facturas",
+        "description": "Genera facturas profesionales vinculadas a proyectos. Agrega partidas, tasas de impuestos y términos de pago."
+      },
+      "step3": {
+        "title": "Enviar a Clientes",
+        "description": "Envía facturas directamente a los clientes por correo. Recibirán un PDF profesional con instrucciones de pago."
+      },
+      "step4": {
+        "title": "Seguir Pagos",
+        "description": "Marca facturas como pagadas o vencidas. Monitorea tus ingresos y saldos pendientes desde el panel."
+      }
+    },
+    "bookings": {
+      "name": "Gestión de Reservas",
+      "step1": {
+        "title": "Tus Reservas",
+        "description": "Ve y gestiona tus citas programadas. Ve las reservas próximas, confirmadas y canceladas en un solo lugar."
+      },
+      "step2": {
+        "title": "Detalles de Reserva",
+        "description": "Cada reserva muestra la hora, cliente y estado. Toca para ver todos los detalles y gestionar la cita."
+      },
+      "step3": {
+        "title": "Mantente Notificado",
+        "description": "Recibirás notificaciones automáticas para nuevas reservas, cancelaciones y citas próximas."
+      }
+    },
+    "calendar": {
+      "name": "Vista de Calendario",
+      "step1": {
+        "title": "Tu Calendario",
+        "description": "Ve todas tus reservas, tareas y plazos en un calendario visual. Las fechas con eventos están marcadas con puntos de colores."
+      },
+      "step2": {
+        "title": "Vista por Día",
+        "description": "Toca cualquier fecha para ver los eventos de ese día. Tareas, reservas y plazos se listan con horarios y detalles."
+      },
+      "step3": {
+        "title": "Planifica con Anticipación",
+        "description": "Navega entre meses para planificar tu agenda. Los puntos de colores te ayudan a identificar diferentes tipos de eventos."
+      }
+    },
+    "properties": {
+      "name": "Gestión de Propiedades",
+      "step1": {
+        "title": "Tus Propiedades",
+        "description": "Rastrea propiedades asociadas a tus clientes. Agrega direcciones, detalles y códigos de acceso para cada propiedad."
+      },
+      "step2": {
+        "title": "Detalles de Propiedad",
+        "description": "Toca una propiedad para ver su dirección completa, cliente vinculado y detalles. Ve la ubicación en el mapa."
+      },
+      "step3": {
+        "title": "Vincular a Clientes",
+        "description": "Cada propiedad está conectada a un cliente. Al ver un cliente, puedes ver todas sus propiedades asociadas."
+      }
+    },
+    "notifications": {
+      "name": "Centro de Notificaciones",
+      "step1": {
+        "title": "Tus Notificaciones",
+        "description": "Mantente al día con toda la actividad. Nuevas solicitudes, actualizaciones de proyectos, pagos de facturas y más aparecen aquí."
+      },
+      "step2": {
+        "title": "Marcar como Leído",
+        "description": "Toca una notificación para marcarla como leída. Usa las acciones masivas para marcar todas como leídas o archivar las antiguas."
+      },
+      "step3": {
+        "title": "Personalizar Preferencias",
+        "description": "Controla qué notificaciones recibes visitando Ajustes > Preferencias de Notificación."
+      }
+    },
+    "settingsGuide": {
+      "name": "Ajustes de la App",
+      "step1": {
+        "title": "Tu Cuenta",
+        "description": "Edita tu perfil, cambia correo o contraseña, y gestiona las preferencias de notificación desde la sección de Cuenta."
+      },
+      "step2": {
+        "title": "Apariencia e Idioma",
+        "description": "Cambia entre tema claro, oscuro o del sistema. Cambia el idioma de la app entre inglés y español."
+      },
+      "step3": {
+        "title": "Ajustes de Negocio",
+        "description": "Configura tu perfil de negocio, ajustes de facturación, disponibilidad de reservas, códigos QR e integraciones de pago."
+      },
+      "step4": {
+        "title": "Suscripción y Plan",
+        "description": "Ve tu plan actual, gestiona tu suscripción y explora opciones de actualización para más funciones."
+      }
+    },
+    "upgradePro": {
+      "name": "¡Bienvenido a Pro!",
+      "step1": {
+        "title": "Clientes y Proyectos Ilimitados",
+        "description": "Ahora no tienes límites en clientes, proyectos y tareas. Escala tu negocio sin restricciones."
+      },
+      "step2": {
+        "title": "Programador Desbloqueado",
+        "description": "Configura tu disponibilidad y permite que los clientes reserven citas a través de tu página de programación."
+      },
+      "step3": {
+        "title": "5GB de Almacenamiento",
+        "description": "Sube archivos y adjuntos con hasta 5GB de almacenamiento en la nube. Adjunta documentos a facturas y proyectos."
+      },
+      "step4": {
+        "title": "Soporte Prioritario",
+        "description": "Obtén respuestas más rápidas de nuestro equipo de soporte. Tus solicitudes ahora tienen prioridad."
+      }
+    },
+    "upgradePlus": {
+      "name": "¡Bienvenido a Plus!",
+      "step1": {
+        "title": "Notificaciones por SMS",
+        "description": "Envía recordatorios por mensaje de texto a los clientes para reservas, facturas y actualizaciones de proyectos."
+      },
+      "step2": {
+        "title": "Procesamiento de Pagos",
+        "description": "Acepta pagos directamente a través de facturas con integración de Stripe. Cobra más rápido."
+      },
+      "step3": {
+        "title": "Catálogo de Productos",
+        "description": "Crea y gestiona un catálogo de servicios y productos. Agrégalos rápidamente a facturas y presupuestos."
+      },
+      "step4": {
+        "title": "Asistente de IA",
+        "description": "Obtén sugerencias de IA para descripciones de proyectos, notas de facturas y comunicaciones con clientes."
+      }
+    },
+    "upgradeBusiness": {
+      "name": "¡Bienvenido a Business!",
+      "step1": {
+        "title": "Miembros del Equipo",
+        "description": "Invita miembros del equipo para colaborar en proyectos, gestionar clientes y manejar tareas juntos."
+      },
+      "step2": {
+        "title": "Soporte Telefónico",
+        "description": "Obtén soporte telefónico directo de nuestro equipo. Disponible en horario laboral para asuntos urgentes."
+      },
+      "step3": {
+        "title": "Marca Blanca",
+        "description": "Personaliza el portal del cliente con los colores de tu marca, logo y dominio. Hazlo completamente tuyo."
+      },
+      "step4": {
+        "title": "100GB de Almacenamiento",
+        "description": "Almacenamiento masivo para todos tus archivos, documentos y medios. Nunca te preocupes por quedarte sin espacio."
+      }
+    }
   }
 }
