@@ -1,8 +1,11 @@
 import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, LogBox } from 'react-native';
 import * as Sentry from '@sentry/react-native';
+
+// Suppress Supabase auth refresh token errors from LogBox
+LogBox.ignoreLogs(['Invalid Refresh Token']);
 import { useAuthStore } from '@/stores/authStore';
 import { useThemeStore } from '@/stores/themeStore';
 import { useSubscriptionStore } from '@/stores/subscriptionStore';
@@ -25,8 +28,10 @@ Sentry.init({
   },
   environment: __DEV__ ? 'development' : 'production',
   beforeSend(event) {
-    // Don't send events in dev mode
     if (__DEV__) return null;
+    // Don't report stale refresh token errors — handled gracefully by auth store
+    const message = event.exception?.values?.[0]?.value || '';
+    if (message.includes('Refresh Token')) return null;
     return event;
   },
 });

@@ -1,16 +1,35 @@
 import { View, Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
 export default function WelcomeScreen() {
   const { colors } = useTheme();
-  const { t } = useTranslations();
+  const { t, locale, setLocale } = useTranslations();
   const router = useRouter();
+
+  const toggleLanguage = () => {
+    setLocale(locale === 'en' ? 'es' : 'en');
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* Language toggle */}
+      <View style={styles.langRow}>
+        <TouchableOpacity
+          style={[styles.langButton, { backgroundColor: colors.surface }]}
+          onPress={toggleLanguage}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="language" size={16} color={colors.textSecondary} />
+          <Text style={[styles.langText, { color: colors.textSecondary }]}>
+            {locale === 'en' ? 'ES' : 'EN'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       <View style={styles.content}>
         {/* Logo & Branding */}
         <View style={styles.branding}>
@@ -52,6 +71,24 @@ export default function WelcomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  langRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.sm,
+  },
+  langButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.full,
+  },
+  langText: {
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
   },
   content: {
     flex: 1,
