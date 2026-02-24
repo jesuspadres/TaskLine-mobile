@@ -29,9 +29,11 @@ Sentry.init({
   environment: __DEV__ ? 'development' : 'production',
   beforeSend(event) {
     if (__DEV__) return null;
-    // Don't report stale refresh token errors — handled gracefully by auth store
+    // Filter known non-actionable errors
     const message = event.exception?.values?.[0]?.value || '';
     if (message.includes('Refresh Token')) return null;
+    // Android react-native-screens bug: stale drawing order during transitions
+    if (message.includes('getChildDrawingOrder')) return null;
     return event;
   },
 });
