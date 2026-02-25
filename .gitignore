@@ -37,6 +37,7 @@ GoogleService-Info.plist
 *-firebase-adminsdk-*.json
 *.gserviceaccount*.json
 primeval-falcon-*.json
+AuthKey.p8
 
 # Local env files
 .env

@@ -35,6 +35,11 @@
   },
   "submit": {
     "production": {
+      "ios": {
+        "ascApiKeyPath": "./AuthKey.p8",
+        "ascApiKeyIssuerId": "d6a5293e-600d-4152-92f1-5c6ff08a61f3",
+        "ascApiKeyId": "5Y7ZJYYB2J"
+      },
       "android": {
         "track": "internal",
         "releaseStatus": "draft",
