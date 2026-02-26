@@ -29,6 +29,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     buildNumber: '1',
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
+      NSLocationWhenInUseUsageDescription:
+        'TaskLine uses your location to show property and client addresses on maps.',
     },
     config: {
       googleMapsApiKey: GOOGLE_MAPS_API_KEY,

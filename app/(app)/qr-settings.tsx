@@ -57,19 +57,28 @@ export default function QRSettingsScreen() {
   interface QRSettingsCache {
     requests: { foreground_color: string; background_color: string; size_preset: SizePreset; custom_url?: string } | null;
     custom: { foreground_color: string; background_color: string; size_preset: SizePreset; custom_url?: string } | null;
+    shortCode: string | null;
   }
 
   const { data: qrData, loading, refresh } = useOfflineData<QRSettingsCache>(
     'qr_settings',
     async () => {
-      const { data, error } = await (supabase.from('user_qr_codes') as any)
-        .select('*')
-        .eq('user_id', user!.id);
+      const [qrResult, linkResult] = await Promise.all([
+        (supabase.from('user_qr_codes') as any)
+          .select('*')
+          .eq('user_id', user!.id),
+        (supabase.from('user_request_links') as any)
+          .select('short_code')
+          .eq('user_id', user!.id)
+          .eq('is_active', true)
+          .single(),
+      ]);
 
-      const rows = (!error && data) ? data as any[] : [];
+      const rows = (!qrResult.error && qrResult.data) ? qrResult.data as any[] : [];
       return {
         requests: rows.find((r: any) => r.qr_type === 'requests') || null,
         custom: rows.find((r: any) => r.qr_type === 'custom') || null,
+        shortCode: linkResult.data?.short_code || null,
       };
     },
     { enabled: !!user?.id },
@@ -88,7 +97,9 @@ export default function QRSettingsScreen() {
     setHasAppliedCache(cacheFingerprint);
   }
 
-  const requestUrl = `${ENV.APP_URL}/request/${user?.id || ''}`;
+  const requestUrl = qrData?.shortCode
+    ? `${ENV.APP_URL}/portal?code=${qrData.shortCode}`
+    : '';
   const currentUrl = activeTab === 'requests' ? requestUrl : customUrl;
 
   const handleTabChange = (tab: TabType) => {

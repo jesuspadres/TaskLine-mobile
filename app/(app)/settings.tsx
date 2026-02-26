@@ -311,8 +311,19 @@ export default function SettingsScreen() {
   };
 
   const handleShowRequestLink = async () => {
-    const requestLink = `${ENV.APP_URL}/request/${user?.id || ''}`;
     try {
+      const { data } = await (supabase.from('user_request_links') as any)
+        .select('short_code')
+        .eq('user_id', user!.id)
+        .eq('is_active', true)
+        .single();
+
+      if (!data?.short_code) {
+        showToast('error', t('common.error'));
+        return;
+      }
+
+      const requestLink = `${ENV.APP_URL}/portal?code=${data.short_code}`;
       await Share.share({
         message: `${t('settings.submitRequest')}: ${requestLink}`,
         url: requestLink,

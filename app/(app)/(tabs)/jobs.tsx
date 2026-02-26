@@ -423,23 +423,32 @@ export default function JobsScreen() {
     }
   };
 
-  const handleShareLink = async () => {
-    const requestLink = `${ENV.APP_URL}/request/${user?.id}`;
+  const getPortalUrl = async (): Promise<string | null> => {
     try {
-      await Share.share({
-        message: requestLink,
-        title: t('requests.shareLink'),
-      });
+      const { data } = await (supabase.from('user_request_links') as any)
+        .select('short_code')
+        .eq('user_id', user!.id)
+        .eq('is_active', true)
+        .single();
+      return data?.short_code ? `${ENV.APP_URL}/portal?code=${data.short_code}` : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleShareLink = async () => {
+    const url = await getPortalUrl();
+    if (!url) { showToast('error', t('common.error')); return; }
+    try {
+      await Share.share({ message: url, title: t('requests.shareLink') });
     } catch (_) { /* user cancelled */ }
   };
 
   const handleShareBookingLink = async () => {
-    const bookingLink = `${ENV.APP_URL}/portal/${user?.id}`;
+    const url = await getPortalUrl();
+    if (!url) { showToast('error', t('common.error')); return; }
     try {
-      await Share.share({
-        message: bookingLink,
-        title: t('bookings.title'),
-      });
+      await Share.share({ message: url, title: t('bookings.title') });
     } catch (_) { /* user cancelled */ }
   };
 
