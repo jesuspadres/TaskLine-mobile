@@ -31,6 +31,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       ITSAppUsesNonExemptEncryption: false,
       NSLocationWhenInUseUsageDescription:
         'TaskLine uses your location to show property and client addresses on maps.',
+      NSFaceIDUsageDescription:
+        'TaskLine uses Face ID to quickly unlock the app and protect your data.',
     },
     config: {
       googleMapsApiKey: GOOGLE_MAPS_API_KEY,
@@ -78,6 +80,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   plugins: [
     'expo-router',
     'expo-secure-store',
+    'expo-local-authentication',
     'expo-localization',
     'expo-web-browser',
     [

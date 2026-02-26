@@ -18,7 +18,8 @@
     "noResults": "No se encontraron resultados",
     "pullToRefresh": "Desliza para actualizar",
     "required": "Obligatorio",
-    "ok": "OK"
+    "ok": "OK",
+    "notNow": "Ahora no"
   },
   "auth": {
     "login": "Iniciar sesion",
@@ -1005,7 +1006,29 @@
     "emailChangeHint": "Usa \"Cambiar correo\" en la configuración de cuenta para actualizar tu correo.",
     "saveChanges": "Guardar cambios",
     "defaultUser": "Usuario",
-    "dateOfBirth": "Fecha de nacimiento"
+    "dateOfBirth": "Fecha de nacimiento",
+    "biometricFaceId": "Desbloqueo con Face ID",
+    "biometricFingerprint": "Desbloqueo con Huella Digital",
+    "biometricEnabled": "Desbloquear con biometria al abrir la app",
+    "biometricDisabled": "Toca para activar el desbloqueo biometrico",
+    "biometricTurnedOn": "Desbloqueo biometrico activado",
+    "biometricTurnedOff": "Desbloqueo biometrico desactivado",
+    "biometricSetupFailed": "Verificacion biometrica fallida. Intentalo de nuevo."
+  },
+  "biometric": {
+    "promptTitle": "Activar desbloqueo biometrico?",
+    "promptDescription": "Desbloquea TaskLine rapidamente con Face ID o huella digital en lugar de escribir tu contrasena.",
+    "enableButton": "Activar",
+    "unlockTitle": "TaskLine esta Bloqueada",
+    "unlockWithFaceId": "Desbloquear con Face ID",
+    "unlockWithFingerprint": "Desbloquear con Huella Digital",
+    "unlockWithBiometrics": "Desbloquear con Biometria",
+    "unlockButton": "Desbloquear",
+    "tryAgain": "Intentar de Nuevo",
+    "usePassword": "Iniciar sesion con contrasena",
+    "authFailed": "Autenticacion fallida. Intentalo de nuevo.",
+    "promptMessage": "Verifica tu identidad para desbloquear TaskLine",
+    "cancelLabel": "Cancelar"
   },
   "storageManagement": {
     "title": "Almacenamiento",
@@ -1130,6 +1153,7 @@
     "manageBilling": "Administrar facturacion",
     "manageSubscription": "Administrar suscripcion",
     "saveVsMonthly": "Ahorra %{percent}% vs mensual",
+    "billedYearly": "Facturado a $%{amount}/ano",
     "forever": "Para siempre",
     "planNames": {
       "free": "Gratis",

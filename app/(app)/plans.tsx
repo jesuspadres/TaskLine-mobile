@@ -542,6 +542,12 @@ export default function PlansScreen() {
                 </Text>
               </View>
 
+              {billingPeriod === 'annual' && price > 0 && (
+                <Text style={[styles.yearlyTotal, { color: colors.textSecondary }]}>
+                  {t('plans.billedYearly', { amount: String(price * 12) })}
+                </Text>
+              )}
+
               {billingPeriod === 'annual' && savings > 0 && (
                 <Text style={[styles.savingsText, { color: colors.success }]}>
                   {t('plans.saveVsMonthly', { percent: String(savings) })}
@@ -1336,6 +1342,10 @@ const styles = StyleSheet.create({
   pricePeriod: {
     fontSize: FontSizes.md,
     marginLeft: 4,
+  },
+  yearlyTotal: {
+    fontSize: FontSizes.sm,
+    marginBottom: 2,
   },
   savingsText: {
     fontSize: FontSizes.sm,

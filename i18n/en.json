@@ -18,7 +18,8 @@
     "noResults": "No results found",
     "pullToRefresh": "Pull to refresh",
     "required": "Required",
-    "ok": "OK"
+    "ok": "OK",
+    "notNow": "Not Now"
   },
   "auth": {
     "login": "Sign In",
@@ -1005,7 +1006,29 @@
     "emailChangeHint": "Use \"Change Email\" in Account settings to update your email.",
     "saveChanges": "Save Changes",
     "defaultUser": "User",
-    "dateOfBirth": "Date of Birth"
+    "dateOfBirth": "Date of Birth",
+    "biometricFaceId": "Face ID Unlock",
+    "biometricFingerprint": "Fingerprint Unlock",
+    "biometricEnabled": "Unlock with biometrics on app open",
+    "biometricDisabled": "Tap to enable biometric unlock",
+    "biometricTurnedOn": "Biometric unlock enabled",
+    "biometricTurnedOff": "Biometric unlock disabled",
+    "biometricSetupFailed": "Biometric verification failed. Please try again."
+  },
+  "biometric": {
+    "promptTitle": "Enable Biometric Unlock?",
+    "promptDescription": "Unlock TaskLine quickly with Face ID or fingerprint instead of typing your password.",
+    "enableButton": "Enable",
+    "unlockTitle": "TaskLine is Locked",
+    "unlockWithFaceId": "Unlock with Face ID",
+    "unlockWithFingerprint": "Unlock with Fingerprint",
+    "unlockWithBiometrics": "Unlock with Biometrics",
+    "unlockButton": "Unlock",
+    "tryAgain": "Try Again",
+    "usePassword": "Sign in with Password",
+    "authFailed": "Authentication failed. Try again.",
+    "promptMessage": "Verify your identity to unlock TaskLine",
+    "cancelLabel": "Cancel"
   },
   "storageManagement": {
     "title": "Storage",
@@ -1153,6 +1176,7 @@
     "manageBilling": "Manage Billing",
     "manageSubscription": "Manage Subscription",
     "saveVsMonthly": "Save %{percent}% vs monthly",
+    "billedYearly": "Billed at $%{amount}/year",
     "forever": "forever",
     "cancelSubscription": "Cancel Subscription",
     "resumeSubscription": "Resume Subscription",

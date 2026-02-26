@@ -23,8 +23,8 @@ import { useAuthStore } from '@/stores/authStore';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
-import { useNavigationBadges } from '@/hooks/useNavigationBadges';
 import { useSubscription } from '@/hooks/useSubscription';
+import { useBiometricAuth } from '@/hooks/useBiometricAuth';
 import { useTutorial } from '@/hooks/useTutorial';
 import { ENV } from '@/lib/env';
 import { getPlan } from '@/lib/plans';
@@ -64,8 +64,8 @@ export default function SettingsScreen() {
   const { user, logout, refreshUser } = useAuthStore();
   const { colors, isDark, mode, setMode } = useTheme();
   const { t, locale, setLocale } = useTranslations();
-  const { counts } = useNavigationBadges();
   const subscription = useSubscription();
+  const { isAvailable: biometricAvailable, enabled: biometricEnabled, biometricType, enableBiometric, disableBiometric } = useBiometricAuth();
   useTutorial('settings');
   const { tier } = subscription;
   const [loading, setLoading] = useState(false);
@@ -552,14 +552,6 @@ export default function SettingsScreen() {
           onPress: () => setShowPasswordConfirm(true),
         },
         {
-          id: 'notifications',
-          icon: 'notifications-outline',
-          title: t('notifications.title'),
-          subtitle: counts.notifications > 0 ? t('settings.unreadCount', { count: counts.notifications }) : t('more.noUnread'),
-          type: 'link',
-          onPress: () => router.push('/(app)/notifications' as any),
-        },
-        {
           id: 'notification_settings',
           icon: 'options-outline',
           title: t('settings.notificationPreferences'),
@@ -567,6 +559,31 @@ export default function SettingsScreen() {
           type: 'link',
           onPress: () => router.push('/(app)/notification-settings' as any),
         },
+        ...(Platform.OS !== 'web' && biometricAvailable ? [{
+          id: 'biometric',
+          icon: biometricType === 'faceid' ? 'scan-outline' : 'finger-print',
+          title: biometricType === 'faceid'
+            ? t('settings.biometricFaceId')
+            : t('settings.biometricFingerprint'),
+          subtitle: biometricEnabled
+            ? t('settings.biometricEnabled')
+            : t('settings.biometricDisabled'),
+          type: 'toggle' as const,
+          value: biometricEnabled,
+          onPress: async () => {
+            if (biometricEnabled) {
+              disableBiometric();
+              showToast('info', t('settings.biometricTurnedOff'));
+            } else {
+              const success = await enableBiometric();
+              if (success) {
+                showToast('success', t('settings.biometricTurnedOn'));
+              } else {
+                showToast('error', t('settings.biometricSetupFailed'));
+              }
+            }
+          },
+        }] : []),
         {
           id: 'subscription',
           icon: 'diamond-outline',

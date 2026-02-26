@@ -10,15 +10,18 @@ import {
   ScrollView,
   ActivityIndicator,
   Image,
+  Alert,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '@/stores/authStore';
+import { useBiometricStore } from '@/stores/biometricStore';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
+import { useBiometricAuth } from '@/hooks/useBiometricAuth';
 import { showToast } from '@/components';
 import { useHaptics } from '@/hooks/useHaptics';
 import { ImpactFeedbackStyle } from 'expo-haptics';
@@ -44,6 +47,9 @@ export default function LoginScreen() {
   const [lockoutData, setLockoutData] = useState<LockoutData>({ attempts: 0, firstAttemptAt: 0, lockedUntil: null });
   const [lockoutTimeLeft, setLockoutTimeLeft] = useState(0);
   const { login } = useAuthStore();
+  const { isAvailable: biometricAvailable, enabled: biometricEnabled, enableBiometric } = useBiometricAuth();
+  const { hasBeenPrompted } = useBiometricStore();
+  const setPrompted = useBiometricStore((s) => s.setPrompted);
   const { colors } = useTheme();
   const { t } = useTranslations();
   const router = useRouter();
@@ -146,7 +152,27 @@ export default function LoginScreen() {
         await AsyncStorage.removeItem(REMEMBER_EMAIL_KEY);
       }
       impact(ImpactFeedbackStyle.Medium);
-      router.replace('/(app)/dashboard');
+
+      // Prompt to enable biometric unlock (one-time, native only)
+      if (Platform.OS !== 'web' && biometricAvailable && !biometricEnabled && !hasBeenPrompted) {
+        await setPrompted();
+        Alert.alert(
+          t('biometric.promptTitle'),
+          t('biometric.promptDescription'),
+          [
+            { text: t('common.notNow'), style: 'cancel', onPress: () => router.replace('/(app)/dashboard') },
+            {
+              text: t('biometric.enableButton'),
+              onPress: async () => {
+                await enableBiometric();
+                router.replace('/(app)/dashboard');
+              },
+            },
+          ],
+        );
+      } else {
+        router.replace('/(app)/dashboard');
+      }
     }
   };
 

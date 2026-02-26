@@ -28,3 +28,4 @@ export { FloatingActionButton } from './FloatingActionButton';
 export { OfflineBanner } from './OfflineBanner';
 export { LoadingOverlayProvider, showLoading, hideLoading } from './LoadingOverlay';
 export { TutorialProvider, showTutorial } from './TutorialOverlay';
+export { BiometricLockScreen } from './BiometricLockScreen';

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase, signIn, signUp, signOut, getSession, getUser } from '@/lib/supabase';
+import { useBiometricStore } from '@/stores/biometricStore';
 
 interface AuthState {
   user: User | null;
@@ -107,6 +108,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: async () => {
     set({ loading: true });
+    useBiometricStore.getState().unlock();
+    useBiometricStore.getState().setEnabled(false);
     await signOut();
     set({ user: null, session: null, loading: false });
   },
