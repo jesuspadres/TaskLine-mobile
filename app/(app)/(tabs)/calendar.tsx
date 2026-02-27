@@ -168,18 +168,18 @@ export default function CalendarScreen() {
         const rawDate = booking.booking_date || booking.start_time;
         if (!rawDate) return;
         const dateKey = rawDate.split('T')[0];
-        const startTime = booking.start_time
-          ? new Date(booking.start_time).toLocaleTimeString(dateLocale, {
-              hour: 'numeric',
-              minute: '2-digit',
-            })
-          : null;
-        const endTime = booking.end_time
-          ? new Date(booking.end_time).toLocaleTimeString(dateLocale, {
-              hour: 'numeric',
-              minute: '2-digit',
-            })
-          : null;
+        const fmtTime = (t: string) => {
+          // Handle TIME-only ("09:00:00") or full ISO timestamps
+          if (!t.includes('T') && !t.includes('-')) {
+            const [h, m] = t.split(':');
+            const hr = parseInt(h, 10);
+            if (isNaN(hr)) return t;
+            return `${hr % 12 || 12}:${m} ${hr >= 12 ? 'PM' : 'AM'}`;
+          }
+          return new Date(t).toLocaleTimeString(dateLocale, { hour: 'numeric', minute: '2-digit' });
+        };
+        const startTime = booking.start_time ? fmtTime(booking.start_time) : null;
+        const endTime = booking.end_time ? fmtTime(booking.end_time) : null;
 
         allEvents.push({
           id: booking.id,

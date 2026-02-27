@@ -30,6 +30,7 @@ import {
   ConfirmDialog, Button, showToast,
 } from '@/components';
 import { useAuthStore } from '@/stores/authStore';
+import { useSubscription } from '@/hooks/useSubscription';
 import { useRouter } from 'expo-router';
 
 // --- Types ---
@@ -89,6 +90,7 @@ type Segment = 'requests' | 'bookings';
 
 export default function JobsScreen() {
   const { user } = useAuthStore();
+  const { isFree } = useSubscription();
   const { colors, isDark } = useTheme();
   const { t, locale } = useTranslations();
   useTutorial('jobs');
@@ -278,8 +280,8 @@ export default function JobsScreen() {
     }
     return [...result].sort((a, b) => {
       switch (bookingSort) {
-        case 'soonest': return new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
-        case 'latest': return new Date(b.start_time).getTime() - new Date(a.start_time).getTime();
+        case 'soonest': return new Date(`${a.booking_date || '2000-01-01'}T${a.start_time}`).getTime() - new Date(`${b.booking_date || '2000-01-01'}T${b.start_time}`).getTime();
+        case 'latest': return new Date(`${b.booking_date || '2000-01-01'}T${b.start_time}`).getTime() - new Date(`${a.booking_date || '2000-01-01'}T${a.start_time}`).getTime();
         case 'newest': return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
         case 'oldest': return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
         default: return 0;
@@ -320,15 +322,47 @@ export default function JobsScreen() {
     return date.toLocaleDateString(dateLocale, { month: 'short', day: 'numeric' });
   }, [t, dateLocale]);
 
-  const formatTimeRange = useCallback((start: string, end: string) => {
+  const formatTimeRange = useCallback((start: string, end: string, bookingDate?: string | null) => {
     if (!start || !end) return '';
-    const startDate = new Date(start);
-    const endDate = new Date(end);
-    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return '';
-    const dateStr = startDate.toLocaleDateString(dateLocale, { month: 'short', day: 'numeric' });
-    const startTime = startDate.toLocaleTimeString(dateLocale, { hour: 'numeric', minute: '2-digit' });
-    const endTime = endDate.toLocaleTimeString(dateLocale, { hour: 'numeric', minute: '2-digit' });
-    return `${dateStr} \u00B7 ${startTime} - ${endTime}`;
+
+    // start_time/end_time may be TIME-only ("09:00:00") or full ISO timestamps.
+    // TIME-only strings produce Invalid Date, so combine with booking_date.
+    const isTimeOnly = (s: string) => !s.includes('T') && !s.includes('-');
+
+    let dateStr = '';
+    let startTime = '';
+    let endTime = '';
+
+    if (isTimeOnly(start)) {
+      // TIME-only: format HH:MM:SS → 12h with AM/PM
+      const fmtTime = (t: string) => {
+        const [h, m] = t.split(':');
+        const hour = parseInt(h, 10);
+        if (isNaN(hour)) return t;
+        const ampm = hour >= 12 ? 'PM' : 'AM';
+        return `${hour % 12 || 12}:${m} ${ampm}`;
+      };
+      startTime = fmtTime(start);
+      endTime = fmtTime(end);
+      if (bookingDate) {
+        const d = new Date(bookingDate + 'T00:00:00');
+        if (!isNaN(d.getTime())) {
+          dateStr = d.toLocaleDateString(dateLocale, { month: 'short', day: 'numeric' });
+        }
+      }
+    } else {
+      // Full ISO timestamps
+      const startDate = new Date(start);
+      const endDate = new Date(end);
+      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return '';
+      dateStr = startDate.toLocaleDateString(dateLocale, { month: 'short', day: 'numeric' });
+      startTime = startDate.toLocaleTimeString(dateLocale, { hour: 'numeric', minute: '2-digit' });
+      endTime = endDate.toLocaleTimeString(dateLocale, { hour: 'numeric', minute: '2-digit' });
+    }
+
+    return dateStr
+      ? `${dateStr} \u00B7 ${startTime} - ${endTime}`
+      : `${startTime} - ${endTime}`;
   }, [dateLocale]);
 
   const getStatusLabel = useCallback((status: string) => {
@@ -671,7 +705,7 @@ export default function JobsScreen() {
   const renderBooking = useCallback(({ item }: { item: BookingWithClient }) => {
     const itemColors = bookingStatusColors[item.status] || bookingStatusColors.pending;
     const clientName = item.client?.name || item.client_name || t('bookings.noClient');
-    const isPast = item.status === 'confirmed' && new Date(item.end_time || item.start_time) < new Date();
+    const isPast = item.status === 'confirmed' && item.booking_date && new Date(`${item.booking_date}T${item.end_time || item.start_time}`) < new Date();
 
     return (
       <TouchableOpacity
@@ -716,7 +750,7 @@ export default function JobsScreen() {
         <View style={styles.metaItem}>
           <Ionicons name="time-outline" size={14} color={colors.textTertiary} />
           <Text style={[styles.metaText, { color: colors.textSecondary }]}>
-            {formatTimeRange(item.start_time, item.end_time)}
+            {formatTimeRange(item.start_time, item.end_time, item.booking_date)}
           </Text>
         </View>
 
@@ -959,18 +993,49 @@ export default function JobsScreen() {
                 <RefreshControl refreshing={requestsRefreshing} onRefresh={onRequestsRefresh} />
               }
               ListEmptyComponent={
-                <EmptyState
-                  icon="mail-outline"
-                  title={requestSearch || requestFilterStatus !== 'all'
-                    ? t('requests.noResults')
-                    : t('requests.noRequests')}
-                  description={requestSearch || requestFilterStatus !== 'all'
-                    ? t('requests.tryDifferentSearch')
-                    : t('requests.noRequestsShareDesc')}
-                  actionLabel={!requestSearch && requestFilterStatus === 'all' ? t('requests.sharePortal') : undefined}
-                  onAction={!requestSearch && requestFilterStatus === 'all' ? handleShareLink : undefined}
-                  offline={requestsOffline && !(requests ?? []).length && !requestSearch}
-                />
+                (requestsOffline && !(requests ?? []).length && !requestSearch) ? (
+                  <EmptyState
+                    icon="mail-outline"
+                    title={t('requests.noRequests')}
+                    offline
+                  />
+                ) : (requestSearch || (requestFilterStatus !== 'all' && (requests ?? []).length > 0)) ? (
+                  <EmptyState
+                    icon="mail-outline"
+                    title={t('requests.noResults')}
+                    description={t('requests.tryDifferentSearch')}
+                  />
+                ) : (
+                  <View style={[styles.emptyWithCTA, { marginHorizontal: Spacing.lg }]}>
+                    <View style={[styles.emptyIconSmall, { backgroundColor: colors.surfaceSecondary }]}>
+                      <Ionicons name="mail-outline" size={32} color={colors.textTertiary} />
+                    </View>
+                    <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                      {t('requests.noRequests')}
+                    </Text>
+                    <Text style={[styles.emptyDesc, { color: colors.textSecondary }]}>
+                      {t('jobs.sharePortalDesc')}
+                    </Text>
+                    <View style={styles.emptyActions}>
+                      <TouchableOpacity
+                        style={[styles.emptyActionBtn, { backgroundColor: colors.primary }]}
+                        onPress={handleShareLink}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="share-outline" size={16} color="#fff" />
+                        <Text style={styles.emptyActionBtnText}>{t('jobs.shareLink')}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.emptyActionBtn, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
+                        onPress={navigateToQRSettings}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="qr-code-outline" size={16} color={colors.text} />
+                        <Text style={[styles.emptyActionBtnTextAlt, { color: colors.text }]}>{t('jobs.viewQRCode')}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )
               }
             />
           </View>
@@ -980,7 +1045,54 @@ export default function JobsScreen() {
       {/* ============================================================ */}
       {/* BOOKINGS SEGMENT */}
       {/* ============================================================ */}
-      {segment === 'bookings' && (
+      {segment === 'bookings' && isFree && (
+        <View style={styles.upgradeGateContainer}>
+          <View style={[styles.upgradeGateCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={[styles.upgradeIconCircle, { backgroundColor: colors.warningLight }]}>
+              <Ionicons name="lock-closed" size={32} color={colors.warning} />
+            </View>
+            <Text style={[styles.upgradeTitle, { color: colors.text }]}>
+              {t('jobs.bookingsLocked')}
+            </Text>
+            <Text style={[styles.upgradeDescription, { color: colors.textSecondary }]}>
+              {t('jobs.bookingsLockedDesc')}
+            </Text>
+            <Button
+              title={t('jobs.upgradeToPro')}
+              onPress={() => router.push('/(app)/plans' as any)}
+              variant="primary"
+              size="lg"
+              style={styles.upgradeButton}
+            />
+          </View>
+
+          {/* Share portal CTA below upgrade gate */}
+          <View style={[styles.gateShareRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.gateShareText, { color: colors.textSecondary }]}>
+              {t('jobs.sharePortalDesc')}
+            </Text>
+            <View style={styles.emptyActions}>
+              <TouchableOpacity
+                style={[styles.emptyActionBtn, { backgroundColor: colors.primary }]}
+                onPress={handleShareLink}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="share-outline" size={16} color="#fff" />
+                <Text style={styles.emptyActionBtnText}>{t('jobs.shareLink')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.emptyActionBtn, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
+                onPress={navigateToQRSettings}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="qr-code-outline" size={16} color={colors.text} />
+                <Text style={[styles.emptyActionBtnTextAlt, { color: colors.text }]}>{t('jobs.viewQRCode')}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+      {segment === 'bookings' && !isFree && (
         <>
           {/* Booking Stats */}
           <View style={styles.statsContainer}>
@@ -1059,20 +1171,51 @@ export default function JobsScreen() {
                 <RefreshControl refreshing={bookingsRefreshing} onRefresh={onBookingsRefresh} />
               }
               ListEmptyComponent={
-                <EmptyState
-                  icon="calendar-outline"
-                  title={bookingSearch || bookingFilterStatus !== 'all'
-                    ? t('bookings.noResults')
-                    : t('bookings.noBookings')}
-                  description={bookingSearch || bookingFilterStatus !== 'all'
-                    ? t('bookings.tryDifferentSearch')
-                    : t('requests.noBookingsShareDesc')}
-                  actionLabel={!bookingSearch && bookingFilterStatus === 'all' ? t('requests.sharePortal') : undefined}
-                  onAction={!bookingSearch && bookingFilterStatus === 'all' ? handleShareBookingLink : undefined}
-                  offline={bookingsOffline && !(bookings ?? []).length && !bookingSearch}
-              />
-            }
-          />
+                (bookingsOffline && !(bookings ?? []).length && !bookingSearch) ? (
+                  <EmptyState
+                    icon="calendar-outline"
+                    title={t('bookings.noBookings')}
+                    offline
+                  />
+                ) : (bookingSearch || (bookingFilterStatus !== 'all' && (bookings ?? []).length > 0)) ? (
+                  <EmptyState
+                    icon="calendar-outline"
+                    title={t('bookings.noResults')}
+                    description={t('bookings.tryDifferentSearch')}
+                  />
+                ) : (
+                  <View style={[styles.emptyWithCTA, { marginHorizontal: Spacing.lg }]}>
+                    <View style={[styles.emptyIconSmall, { backgroundColor: colors.surfaceSecondary }]}>
+                      <Ionicons name="calendar-outline" size={32} color={colors.textTertiary} />
+                    </View>
+                    <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                      {t('bookings.noBookings')}
+                    </Text>
+                    <Text style={[styles.emptyDesc, { color: colors.textSecondary }]}>
+                      {t('jobs.sharePortalDesc')}
+                    </Text>
+                    <View style={styles.emptyActions}>
+                      <TouchableOpacity
+                        style={[styles.emptyActionBtn, { backgroundColor: colors.primary }]}
+                        onPress={handleShareBookingLink}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="share-outline" size={16} color="#fff" />
+                        <Text style={styles.emptyActionBtnText}>{t('jobs.shareLink')}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.emptyActionBtn, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
+                        onPress={navigateToQRSettings}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="qr-code-outline" size={16} color={colors.text} />
+                        <Text style={[styles.emptyActionBtnTextAlt, { color: colors.text }]}>{t('jobs.viewQRCode')}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )
+              }
+            />
           </View>
         </>
       )}
@@ -1419,6 +1562,108 @@ const styles = StyleSheet.create({
   quickActionText: {
     fontSize: FontSizes.sm,
     fontWeight: '500',
+  },
+
+  // Upgrade gate
+  upgradeGateContainer: {
+    flex: 1,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.xl,
+  },
+  upgradeGateCard: {
+    borderRadius: BorderRadius.xl,
+    borderWidth: 1,
+    padding: Spacing.xl,
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+  },
+  upgradeIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: BorderRadius.full,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+  },
+  upgradeTitle: {
+    fontSize: FontSizes.xl,
+    fontWeight: '700',
+    marginBottom: Spacing.sm,
+    textAlign: 'center',
+  },
+  upgradeDescription: {
+    fontSize: FontSizes.md,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: Spacing.xl,
+    maxWidth: 300,
+  },
+  upgradeButton: {
+    minWidth: 200,
+  },
+
+  // Compact empty state with inline CTA
+  emptyWithCTA: {
+    alignItems: 'center',
+    paddingVertical: Spacing.xl,
+    paddingHorizontal: Spacing.md,
+  },
+  emptyIconSmall: {
+    width: 64,
+    height: 64,
+    borderRadius: BorderRadius.full,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  emptyTitle: {
+    fontSize: FontSizes.lg,
+    fontWeight: '600',
+    marginBottom: Spacing.xs,
+    textAlign: 'center',
+  },
+  emptyDesc: {
+    fontSize: FontSizes.sm,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: Spacing.lg,
+    maxWidth: 280,
+  },
+  emptyActions: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    width: '100%',
+  },
+  emptyActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.lg,
+    gap: Spacing.xs,
+  },
+  emptyActionBtnText: {
+    color: '#fff',
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
+  },
+  emptyActionBtnTextAlt: {
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
+  },
+  // Share row in upgrade gate
+  gateShareRow: {
+    borderRadius: BorderRadius.xl,
+    borderWidth: 1,
+    padding: Spacing.md,
+    alignItems: 'center',
+  },
+  gateShareText: {
+    fontSize: FontSizes.sm,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: Spacing.md,
   },
 
   // Sort modal

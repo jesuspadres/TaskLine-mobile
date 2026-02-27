@@ -254,7 +254,7 @@ describe('SettingsScreen', () => {
   it('navigates to booking settings on press', () => {
     render(<SettingsScreen />);
 
-    fireEvent.press(screen.getByText('settings.bookingSettings'));
+    fireEvent.press(screen.getByText('settings.scheduling'));
 
     expect(mockRouter.push).toHaveBeenCalledWith('/(app)/booking-settings' as any);
   });

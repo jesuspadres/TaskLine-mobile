@@ -144,6 +144,42 @@ export async function createFoundingLockInSession(): Promise<string> {
 }
 
 /**
+ * Get the founding member spots counter (public data).
+ * Returns how many spots are claimed and remaining.
+ */
+export async function getFoundingSpots(): Promise<{ claimed: number; total: number; remaining: number }> {
+  const res = await websiteApiFetch('/api/founding/spots');
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch founding spots (${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Claim a founding member spot. Only works for Free/Pro users
+ * who haven't already claimed a spot.
+ * Returns the assigned spot number and trial end date.
+ */
+export async function claimFoundingSpot(): Promise<{
+  success: boolean;
+  spot_number: number;
+  trial_ends_at: string;
+}> {
+  const res = await websiteApiFetch('/api/founding/claim', {
+    method: 'POST',
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Claim failed (${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
  * Create a Stripe Connect Dashboard login link.
  * Returns the Stripe Dashboard URL.
  */
@@ -224,10 +260,10 @@ export async function cancelSubscription(): Promise<{
  * Send a counter offer for a booking (propose alternative date/time).
  * Max 3 rounds per booking.
  */
-export async function sendCounterOffer(bookingId: string, proposedDate: string, proposedTime: string, message?: string): Promise<{ success: boolean }> {
+export async function sendCounterOffer(bookingId: string, proposedDate: string, proposedStartTime: string, proposedEndTime: string, message?: string): Promise<{ success: boolean }> {
   const res = await websiteApiFetch(`/api/booking/${bookingId}/counter`, {
     method: 'POST',
-    body: JSON.stringify({ proposed_date: proposedDate, proposed_time: proposedTime, message }),
+    body: JSON.stringify({ proposedDate, proposedStartTime, proposedEndTime, message }),
   });
 
   if (!res.ok) {
@@ -241,14 +277,158 @@ export async function sendCounterOffer(bookingId: string, proposedDate: string, 
 /**
  * Get counter offer history for a booking.
  */
-export async function getCounterOffers(bookingId: string): Promise<any[]> {
+export interface CounterProposal {
+  id: string;
+  original_date: string;
+  original_start_time: string;
+  original_end_time: string;
+  proposed_date: string;
+  proposed_start_time: string;
+  proposed_end_time: string;
+  message: string | null;
+  status: 'pending' | 'accepted' | 'declined' | 'expired';
+  round_number: number;
+  created_at: string;
+  responded_at: string | null;
+  response_message: string | null;
+}
+
+export interface CounterOfferHistory {
+  proposals: CounterProposal[];
+  canCounter: boolean;
+  declinedCount: number;
+  maxRounds: number;
+}
+
+export async function getCounterOffers(bookingId: string): Promise<CounterOfferHistory> {
   const res = await websiteApiFetch(`/api/booking/${bookingId}/counter`, {
     method: 'GET',
   });
 
-  if (!res.ok) return [];
+  if (!res.ok) return { proposals: [], canCounter: true, declinedCount: 0, maxRounds: 3 };
   const data = await res.json();
-  return data.counterOffers || [];
+  return {
+    proposals: data.proposals || [],
+    canCounter: data.canCounter ?? true,
+    declinedCount: data.declinedCount ?? 0,
+    maxRounds: data.maxRounds ?? 3,
+  };
+}
+
+// ================================================================
+// Request Form Settings
+// ================================================================
+
+/**
+ * Get timeline options for the client request form.
+ */
+export async function getRequestFormSettings(userId: string): Promise<{ timeline_options: string[] }> {
+  const res = await websiteApiFetch(`/api/request-form-settings?userId=${userId}`);
+
+  if (!res.ok) {
+    return { timeline_options: ['ASAP', '1-2 weeks', '1 month', '2-3 months', '3-6 months', 'Flexible'] };
+  }
+
+  return res.json();
+}
+
+/**
+ * Update timeline options for the client request form.
+ */
+export async function updateRequestFormSettings(timelineOptions: string[]): Promise<{ success: boolean; timeline_options: string[] }> {
+  const res = await websiteApiFetch('/api/request-form-settings', {
+    method: 'PUT',
+    body: JSON.stringify({ timeline_options: timelineOptions }),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Failed to save (${res.status})`);
+  }
+
+  return res.json();
+}
+
+// ================================================================
+// Branding Settings
+// ================================================================
+
+export interface BrandingSettings {
+  primary_color: string;
+  accent_color: string;
+  logo_url: string | null;
+  show_business_name: boolean;
+}
+
+export async function getBrandingSettings(): Promise<{ settings: BrandingSettings; requiresUpgrade?: boolean }> {
+  const res = await websiteApiFetch('/api/branding');
+
+  if (res.status === 403) {
+    const data = await res.json().catch(() => ({}));
+    if (data.requiresUpgrade) {
+      return {
+        settings: { primary_color: '#FFFFFF', accent_color: '#16A34A', logo_url: null, show_business_name: true },
+        requiresUpgrade: true,
+      };
+    }
+  }
+
+  if (!res.ok) {
+    return {
+      settings: { primary_color: '#FFFFFF', accent_color: '#16A34A', logo_url: null, show_business_name: true },
+    };
+  }
+
+  return res.json();
+}
+
+export async function updateBrandingSettings(settings: Omit<BrandingSettings, 'logo_url'>): Promise<BrandingSettings> {
+  const res = await websiteApiFetch('/api/branding', {
+    method: 'PUT',
+    body: JSON.stringify(settings),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Failed to save branding (${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function uploadBrandingLogo(uri: string, mimeType: string): Promise<{ logoUrl: string }> {
+  const cookie = await buildAuthCookie();
+  const ext = mimeType.split('/')[1] === 'svg+xml' ? 'svg' : mimeType.split('/')[1] || 'png';
+  const fileName = `logo.${ext}`;
+
+  const formData = new FormData();
+  formData.append('file', {
+    uri,
+    name: fileName,
+    type: mimeType,
+  } as any);
+
+  const res = await fetch(`${ENV.APP_URL}/api/branding/logo`, {
+    method: 'POST',
+    headers: { 'Cookie': cookie },
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Logo upload failed (${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function deleteBrandingLogo(): Promise<void> {
+  const res = await websiteApiFetch('/api/branding/logo', { method: 'DELETE' });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Logo removal failed (${res.status})`);
+  }
 }
 
 /**

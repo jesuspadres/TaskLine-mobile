@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
+import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
@@ -24,7 +25,6 @@ import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslations } from '@/hooks/useTranslations';
 import { useSubscription } from '@/hooks/useSubscription';
-import { useBiometricAuth } from '@/hooks/useBiometricAuth';
 import { useTutorial } from '@/hooks/useTutorial';
 import { ENV } from '@/lib/env';
 import { getPlan } from '@/lib/plans';
@@ -65,7 +65,6 @@ export default function SettingsScreen() {
   const { colors, isDark, mode, setMode } = useTheme();
   const { t, locale, setLocale } = useTranslations();
   const subscription = useSubscription();
-  const { isAvailable: biometricAvailable, enabled: biometricEnabled, biometricType, enableBiometric, disableBiometric } = useBiometricAuth();
   useTutorial('settings');
   const { tier } = subscription;
   const [loading, setLoading] = useState(false);
@@ -559,31 +558,6 @@ export default function SettingsScreen() {
           type: 'link',
           onPress: () => router.push('/(app)/notification-settings' as any),
         },
-        ...(Platform.OS !== 'web' && biometricAvailable ? [{
-          id: 'biometric',
-          icon: biometricType === 'faceid' ? 'scan-outline' : 'finger-print',
-          title: biometricType === 'faceid'
-            ? t('settings.biometricFaceId')
-            : t('settings.biometricFingerprint'),
-          subtitle: biometricEnabled
-            ? t('settings.biometricEnabled')
-            : t('settings.biometricDisabled'),
-          type: 'toggle' as const,
-          value: biometricEnabled,
-          onPress: async () => {
-            if (biometricEnabled) {
-              disableBiometric();
-              showToast('info', t('settings.biometricTurnedOff'));
-            } else {
-              const success = await enableBiometric();
-              if (success) {
-                showToast('success', t('settings.biometricTurnedOn'));
-              } else {
-                showToast('error', t('settings.biometricSetupFailed'));
-              }
-            }
-          },
-        }] : []),
         {
           id: 'subscription',
           icon: 'diamond-outline',
@@ -639,7 +613,7 @@ export default function SettingsScreen() {
           title: t('settings.branding'),
           subtitle: t('settings.brandingSubtitle'),
           type: 'link',
-          onPress: () => showToast('info', t('settings.brandingComingSoon')),
+          onPress: () => router.push('/(app)/branding-settings' as any),
         },
         {
           id: 'qr_codes',
@@ -652,10 +626,18 @@ export default function SettingsScreen() {
         {
           id: 'request_link',
           icon: 'link-outline',
-          title: t('settings.requestLink'),
-          subtitle: t('settings.requestLinkSubtitle'),
+          title: t('settings.clientPortalLink'),
+          subtitle: t('settings.clientPortalLinkSubtitle'),
           type: 'link',
           onPress: handleShowRequestLink,
+        },
+        {
+          id: 'request_form',
+          icon: 'list-outline',
+          title: t('settings.requestFormSettings'),
+          subtitle: t('settings.requestFormSettingsSubtitle'),
+          type: 'link',
+          onPress: () => router.push('/(app)/request-form-settings' as any),
         },
         {
           id: 'invoices_settings',
@@ -676,8 +658,8 @@ export default function SettingsScreen() {
         {
           id: 'booking_settings',
           icon: 'calendar-outline',
-          title: t('settings.bookingSettings'),
-          subtitle: t('settings.bookingSettingsSubtitle'),
+          title: t('settings.scheduling'),
+          subtitle: t('settings.schedulingSubtitle'),
           type: 'link',
           onPress: () => router.push('/(app)/booking-settings' as any),
         },
@@ -922,6 +904,40 @@ export default function SettingsScreen() {
             </View>
           </View>
         ))}
+
+        {/* Account Info Footer */}
+        <View style={[settingsStyles.accountInfoFooter, { borderTopColor: colors.borderLight }]}>
+          <Text style={[settingsStyles.accountInfoHeader, { color: colors.textTertiary }]}>{t('settings.accountInfo')}</Text>
+          <View style={settingsStyles.accountInfoRow}>
+            <Text style={[settingsStyles.accountInfoLabel, { color: colors.textTertiary }]}>{t('settings.userId')}</Text>
+            <TouchableOpacity
+              onPress={() => {
+                if (user?.id) {
+                  Clipboard.setStringAsync(user.id);
+                  showToast('success', t('settings.copiedUserId'));
+                }
+              }}
+              style={settingsStyles.accountInfoValueRow}
+            >
+              <Text style={[settingsStyles.accountInfoValue, settingsStyles.accountInfoMono, { color: colors.textSecondary }]} numberOfLines={1}>
+                {user?.id || '—'}
+              </Text>
+              <Ionicons name="copy-outline" size={14} color={colors.textTertiary} />
+            </TouchableOpacity>
+          </View>
+          <View style={settingsStyles.accountInfoRow}>
+            <Text style={[settingsStyles.accountInfoLabel, { color: colors.textTertiary }]}>{t('settings.emailLabel')}</Text>
+            <Text style={[settingsStyles.accountInfoValue, { color: colors.textSecondary }]}>{user?.email || '—'}</Text>
+          </View>
+          <View style={settingsStyles.accountInfoRow}>
+            <Text style={[settingsStyles.accountInfoLabel, { color: colors.textTertiary }]}>{t('settings.memberSince')}</Text>
+            <Text style={[settingsStyles.accountInfoValue, { color: colors.textSecondary }]}>
+              {user?.created_at
+                ? new Date(user.created_at).toLocaleDateString(locale === 'es' ? 'es-MX' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+                : '—'}
+            </Text>
+          </View>
+        </View>
 
         {loading && (
           <View style={[styles.loadingOverlay, { backgroundColor: colors.overlay }]}>
@@ -1648,5 +1664,41 @@ const settingsStyles = StyleSheet.create({
   subCompareBtnText: {
     fontSize: FontSizes.sm,
     fontWeight: '600',
+  },
+  accountInfoFooter: {
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.lg,
+    marginTop: Spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: Spacing.sm,
+  },
+  accountInfoHeader: {
+    fontSize: FontSizes.xs,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: Spacing.xs,
+  },
+  accountInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  accountInfoLabel: {
+    fontSize: FontSizes.xs,
+  },
+  accountInfoValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    flexShrink: 1,
+    maxWidth: '60%',
+  },
+  accountInfoValue: {
+    fontSize: FontSizes.xs,
+    flexShrink: 1,
+  },
+  accountInfoMono: {
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
 });

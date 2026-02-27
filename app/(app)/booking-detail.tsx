@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -25,7 +25,8 @@ import { useTranslations } from '@/hooks/useTranslations';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useOfflineData } from '@/hooks/useOfflineData';
 import { invalidateCache, updateCacheData } from '@/lib/offlineStorage';
-import { sendCounterOffer } from '@/lib/websiteApi';
+import { sendCounterOffer, getCounterOffers } from '@/lib/websiteApi';
+import type { CounterProposal, CounterOfferHistory } from '@/lib/websiteApi';
 
 interface BookingData {
   id: string;
@@ -112,13 +113,36 @@ export default function BookingDetailScreen() {
   // Counter offer state
   const [counterModalVisible, setCounterModalVisible] = useState(false);
   const [counterDate, setCounterDate] = useState<Date | null>(new Date());
-  const [counterTime, setCounterTime] = useState('09:00');
+  const [counterStartTime, setCounterStartTime] = useState('09:00');
+  const [counterEndTime, setCounterEndTime] = useState('10:00');
   const [counterMessage, setCounterMessage] = useState('');
   const [counterSending, setCounterSending] = useState(false);
 
+  // Proposal history state
+  const [proposalHistory, setProposalHistory] = useState<CounterOfferHistory | null>(null);
+  const [proposalsLoading, setProposalsLoading] = useState(false);
+
+  const fetchProposals = useCallback(async () => {
+    if (!id) return;
+    setProposalsLoading(true);
+    try {
+      const data = await getCounterOffers(id);
+      setProposalHistory(data);
+    } catch {
+      // Non-critical — proposals just won't show
+    } finally {
+      setProposalsLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    if (booking) fetchProposals();
+  }, [booking?.id]);
+
   const onRefresh = useCallback(() => {
     refresh();
-  }, [refresh]);
+    fetchProposals();
+  }, [refresh, fetchProposals]);
 
   // ================================================================
   // ACTIONS
@@ -211,11 +235,12 @@ export default function BookingDetailScreen() {
     setCounterSending(true);
     try {
       const proposedDate = counterDate.toISOString().split('T')[0];
-      await sendCounterOffer(booking.id, proposedDate, counterTime, counterMessage.trim() || undefined);
+      await sendCounterOffer(booking.id, proposedDate, counterStartTime, counterEndTime, counterMessage.trim() || undefined);
       haptics.notification(Haptics.NotificationFeedbackType.Success);
       showToast('success', t('bookingDetail.counterSent'));
       setCounterModalVisible(false);
       setCounterMessage('');
+      fetchProposals();
     } catch (error: any) {
       secureLog.error('Counter offer error:', error);
       showToast('error', error.message || t('bookingDetail.counterError'));
@@ -263,7 +288,10 @@ export default function BookingDetailScreen() {
   // ================================================================
   const formatDate = useCallback((dateString: string) => {
     if (!dateString) return '';
-    const date = new Date(dateString);
+    // Date-only strings ("2024-07-15") are parsed as UTC by JS, causing
+    // off-by-one in western timezones. Append T00:00:00 to force local.
+    const safe = dateString.includes('T') ? dateString : dateString + 'T00:00:00';
+    const date = new Date(safe);
     if (isNaN(date.getTime())) return '';
     return date.toLocaleDateString(dateLocale, {
       weekday: 'long',
@@ -275,6 +303,14 @@ export default function BookingDetailScreen() {
 
   const formatTime = useCallback((dateString: string) => {
     if (!dateString) return '';
+    // Handle TIME-only strings ("09:00:00") from PostgreSQL TIME columns
+    if (!dateString.includes('T') && !dateString.includes('-')) {
+      const [h, m] = dateString.split(':');
+      const hour = parseInt(h, 10);
+      if (isNaN(hour)) return dateString;
+      const ampm = hour >= 12 ? 'PM' : 'AM';
+      return `${hour % 12 || 12}:${m} ${ampm}`;
+    }
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return '';
     return date.toLocaleTimeString(dateLocale, {
@@ -288,6 +324,32 @@ export default function BookingDetailScreen() {
     const translated = t(key);
     return translated !== key ? translated : status.charAt(0).toUpperCase() + status.slice(1);
   }, [t]);
+
+  const formatShortDate = useCallback((dateStr: string) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr + 'T00:00:00');
+    if (isNaN(date.getTime())) return dateStr;
+    return date.toLocaleDateString(dateLocale, { month: 'short', day: 'numeric', year: 'numeric' });
+  }, [dateLocale]);
+
+  const formatHHMM = useCallback((timeStr: string) => {
+    if (!timeStr) return '';
+    // timeStr is "HH:MM" or "HH:MM:SS"
+    const [h, m] = timeStr.split(':');
+    const hour = parseInt(h, 10);
+    const minute = m || '00';
+    if (isNaN(hour)) return timeStr;
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const h12 = hour % 12 || 12;
+    return `${h12}:${minute} ${ampm}`;
+  }, []);
+
+  const proposalStatusConfig = useMemo<Record<string, { icon: string; color: string; bg: string; labelKey: string }>>(() => ({
+    pending: { icon: 'time-outline', color: colors.warning, bg: colors.warningLight, labelKey: 'bookingDetail.proposalPending' },
+    accepted: { icon: 'checkmark-circle', color: colors.success, bg: colors.successLight, labelKey: 'bookingDetail.proposalAccepted' },
+    declined: { icon: 'close-circle', color: colors.error, bg: colors.errorLight, labelKey: 'bookingDetail.proposalDeclined' },
+    expired: { icon: 'hourglass-outline', color: colors.textTertiary, bg: colors.surfaceSecondary, labelKey: 'bookingDetail.proposalExpired' },
+  }), [colors]);
 
   const openInMaps = (address: string, lat?: number | null, lng?: number | null) => {
     if (lat && lng) {
@@ -337,7 +399,7 @@ export default function BookingDetailScreen() {
   const isPending = booking.status === 'pending';
   const isConfirmed = booking.status === 'confirmed';
   const isCompleted = booking.status === 'completed';
-  const isPast = isConfirmed && new Date(booking.end_time || booking.start_time) < new Date();
+  const isPast = isConfirmed && booking.booking_date && new Date(`${booking.booking_date}T${booking.end_time || booking.start_time}`) < new Date();
 
   // ================================================================
   // RENDER
@@ -532,6 +594,83 @@ export default function BookingDetailScreen() {
           </View>
         ) : null}
 
+        {/* Proposal History Card */}
+        {proposalHistory && proposalHistory.proposals.length > 0 && (
+          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="swap-horizontal-outline" size={18} color={colors.text} />
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                {t('bookingDetail.proposalHistory')} ({proposalHistory.proposals.length})
+              </Text>
+            </View>
+
+            {proposalHistory.proposals.map((proposal, idx) => {
+              const cfg = proposalStatusConfig[proposal.status] || proposalStatusConfig.pending;
+              return (
+                <View
+                  key={proposal.id}
+                  style={[
+                    styles.proposalItem,
+                    { backgroundColor: cfg.bg, borderColor: cfg.color + '30' },
+                    idx < proposalHistory.proposals.length - 1 && { marginBottom: Spacing.sm },
+                  ]}
+                >
+                  {/* Header: Round + Status */}
+                  <View style={styles.proposalHeader}>
+                    <Text style={[styles.proposalRound, { color: colors.text }]}>
+                      {t('bookingDetail.proposalRound', { number: String(proposal.round_number) })}
+                    </Text>
+                    <View style={[styles.proposalStatusBadge, { backgroundColor: cfg.color + '20' }]}>
+                      <Ionicons name={cfg.icon as any} size={12} color={cfg.color} />
+                      <Text style={[styles.proposalStatusText, { color: cfg.color }]}>
+                        {t(cfg.labelKey)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Proposed date/time */}
+                  <View style={styles.proposalTimeRow}>
+                    <Ionicons name="arrow-forward" size={14} color={colors.textSecondary} />
+                    <Text style={[styles.proposalTimeText, { color: colors.text }]}>
+                      {formatShortDate(proposal.proposed_date)}, {formatHHMM(proposal.proposed_start_time)} – {formatHHMM(proposal.proposed_end_time)}
+                    </Text>
+                  </View>
+
+                  {/* Your message */}
+                  {proposal.message && (
+                    <Text style={[styles.proposalMessage, { color: colors.textSecondary }]} numberOfLines={2}>
+                      {proposal.message}
+                    </Text>
+                  )}
+
+                  {/* Client response message */}
+                  {proposal.response_message && (
+                    <View style={[styles.proposalResponseRow, { backgroundColor: colors.surfaceSecondary }]}>
+                      <Ionicons name="chatbubble-outline" size={12} color={colors.textSecondary} />
+                      <Text style={[styles.proposalResponseText, { color: colors.textSecondary }]} numberOfLines={2}>
+                        {proposal.response_message}
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Timestamp */}
+                  <Text style={[styles.proposalTimestamp, { color: colors.textTertiary }]}>
+                    {formatShortDate(proposal.created_at.split('T')[0])}
+                    {proposal.responded_at && ` · ${t('bookingDetail.respondedAt')} ${formatShortDate(proposal.responded_at.split('T')[0])}`}
+                  </Text>
+                </View>
+              );
+            })}
+
+            {/* Remaining counter info */}
+            {!proposalHistory.canCounter && (
+              <Text style={[styles.proposalMaxReached, { color: colors.error }]}>
+                {t('bookingDetail.maxProposalsReached')}
+              </Text>
+            )}
+          </View>
+        )}
+
         {/* Action Buttons — Pending */}
         {isPending && (
           <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -550,13 +689,15 @@ export default function BookingDetailScreen() {
                 style={styles.actionButton}
               />
             </View>
-            <TouchableOpacity
-              style={[styles.counterOfferBtn, { borderColor: colors.primary }]}
-              onPress={() => setCounterModalVisible(true)}
-            >
-              <Ionicons name="swap-horizontal-outline" size={18} color={colors.primary} />
-              <Text style={[styles.counterOfferBtnText, { color: colors.primary }]}>{t('bookingDetail.proposeNewTime')}</Text>
-            </TouchableOpacity>
+            {proposalHistory?.canCounter !== false && (
+              <TouchableOpacity
+                style={[styles.counterOfferBtn, { borderColor: colors.primary }]}
+                onPress={() => setCounterModalVisible(true)}
+              >
+                <Ionicons name="swap-horizontal-outline" size={18} color={colors.primary} />
+                <Text style={[styles.counterOfferBtnText, { color: colors.primary }]}>{t('bookingDetail.proposeNewTime')}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -649,12 +790,24 @@ export default function BookingDetailScreen() {
             />
 
             <View style={styles.counterTimeSection}>
-              <Text style={[styles.counterLabel, { color: colors.text }]}>{t('bookingDetail.proposedTime')}</Text>
+              <Text style={[styles.counterLabel, { color: colors.text }]}>{t('bookingDetail.proposedStartTime')}</Text>
               <TextInput
                 style={[styles.counterTimeInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-                value={counterTime}
-                onChangeText={setCounterTime}
+                value={counterStartTime}
+                onChangeText={setCounterStartTime}
                 placeholder="09:00"
+                placeholderTextColor={colors.textTertiary}
+                keyboardType="numbers-and-punctuation"
+              />
+            </View>
+
+            <View style={styles.counterTimeSection}>
+              <Text style={[styles.counterLabel, { color: colors.text }]}>{t('bookingDetail.proposedEndTime')}</Text>
+              <TextInput
+                style={[styles.counterTimeInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
+                value={counterEndTime}
+                onChangeText={setCounterEndTime}
+                placeholder="10:00"
                 placeholderTextColor={colors.textTertiary}
                 keyboardType="numbers-and-punctuation"
               />
@@ -849,6 +1002,71 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', minHeight: 52,
   },
   counterSendBtnText: { color: '#fff', fontSize: FontSizes.md, fontWeight: '600' },
+
+  // Proposal history
+  proposalItem: {
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    padding: Spacing.md,
+  },
+  proposalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.xs,
+  },
+  proposalRound: {
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
+  },
+  proposalStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
+  },
+  proposalStatusText: {
+    fontSize: FontSizes.xs,
+    fontWeight: '600',
+  },
+  proposalTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    marginBottom: Spacing.xs,
+  },
+  proposalTimeText: {
+    fontSize: FontSizes.sm,
+    fontWeight: '500',
+  },
+  proposalMessage: {
+    fontSize: FontSizes.xs,
+    fontStyle: 'italic',
+    marginBottom: Spacing.xs,
+  },
+  proposalResponseRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.xs,
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    marginBottom: Spacing.xs,
+  },
+  proposalResponseText: {
+    fontSize: FontSizes.xs,
+    flex: 1,
+  },
+  proposalTimestamp: {
+    fontSize: FontSizes.xs,
+  },
+  proposalMaxReached: {
+    fontSize: FontSizes.xs,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: Spacing.sm,
+  },
 
   // Metadata
   metadataFooter: { paddingVertical: Spacing.md, alignItems: 'center' },

@@ -27,7 +27,7 @@ import {
   type PlanData,
 } from '@/lib/plans';
 import { Spacing, FontSizes, BorderRadius, Shadows } from '@/constants/theme';
-import { ConfirmDialog, showToast } from '@/components';
+import { ConfirmDialog, showToast, FoundingPromoBanner } from '@/components';
 import {
   createCheckoutSession,
   updateSubscription,
@@ -338,6 +338,13 @@ export default function PlansScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* First 50 Promo Banner (for eligible non-founding users) */}
+        {!subscription.isFoundingMember && (subscription.isFree || subscription.isPro) && (
+          <View style={{ marginBottom: Spacing.md }}>
+            <FoundingPromoBanner />
+          </View>
+        )}
+
         {/* Founding Member Welcome Banner */}
         {showFoundingBanner && (
           <View

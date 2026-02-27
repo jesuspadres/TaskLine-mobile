@@ -8,6 +8,7 @@ interface TutorialState {
   completedTierTutorials: Record<string, string[]>;
   tutorialsEnabled: boolean;
   lastKnownTier: TierSlug | null;
+  _hasHydrated: boolean;
 
   markComplete: (tutorialId: string) => void;
   markTierTutorialComplete: (tier: string, tutorialId: string) => void;
@@ -26,6 +27,7 @@ export const useTutorialStore = create<TutorialState>()(
       completedTierTutorials: {},
       tutorialsEnabled: true,
       lastKnownTier: null,
+      _hasHydrated: false,
 
       markComplete: (tutorialId: string) => {
         set((state) => ({
@@ -83,6 +85,9 @@ export const useTutorialStore = create<TutorialState>()(
         tutorialsEnabled: state.tutorialsEnabled,
         lastKnownTier: state.lastKnownTier,
       }),
+      onRehydrateStorage: () => () => {
+        useTutorialStore.setState({ _hasHydrated: true });
+      },
     },
   ),
 );

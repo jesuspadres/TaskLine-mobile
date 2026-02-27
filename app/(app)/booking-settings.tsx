@@ -49,6 +49,8 @@ interface SchedulingSettings {
   reminder_message: string;
   booking_location: string;
   show_booking_location: boolean;
+  cancellation_deadline_hours: number;
+  edit_deadline_hours: number;
 }
 
 interface AvailabilityRule {
@@ -132,6 +134,14 @@ const REMINDER_HOURS_OPTIONS = [
   { key: 72, i18nLabel: '72', i18nUnit: 'bookingSettings.hours' },
 ];
 
+const DEADLINE_OPTIONS = [
+  { key: 6, i18nLabel: '6', i18nUnit: 'bookingSettings.hours' },
+  { key: 12, i18nLabel: '12', i18nUnit: 'bookingSettings.hours' },
+  { key: 24, i18nLabel: '24', i18nUnit: 'bookingSettings.hours' },
+  { key: 48, i18nLabel: '48', i18nUnit: 'bookingSettings.hours' },
+  { key: 72, i18nLabel: '72', i18nUnit: 'bookingSettings.hours' },
+];
+
 const TIME_SLOTS: string[] = [];
 for (let h = 6; h <= 22; h++) {
   TIME_SLOTS.push(`${h.toString().padStart(2, '0')}:00`);
@@ -169,6 +179,8 @@ const DEFAULT_SETTINGS: SchedulingSettings = {
   reminder_message: '',
   booking_location: '',
   show_booking_location: true,
+  cancellation_deadline_hours: 24,
+  edit_deadline_hours: 24,
 };
 
 function getDefaultAvailability(): AvailabilityRule[] {
@@ -213,6 +225,7 @@ export default function BookingSettingsScreen() {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     basic: true,
     options: false,
+    cancellation: false,
     reminders: false,
     availability: false,
     timeoff: false,
@@ -286,6 +299,8 @@ export default function BookingSettingsScreen() {
           reminder_message: settingsData.reminder_message ?? DEFAULT_SETTINGS.reminder_message,
           booking_location: settingsData.booking_location ?? DEFAULT_SETTINGS.booking_location,
           show_booking_location: settingsData.show_booking_location ?? DEFAULT_SETTINGS.show_booking_location,
+          cancellation_deadline_hours: settingsData.cancellation_deadline_hours ?? DEFAULT_SETTINGS.cancellation_deadline_hours,
+          edit_deadline_hours: settingsData.edit_deadline_hours ?? DEFAULT_SETTINGS.edit_deadline_hours,
         });
       }
 
@@ -392,6 +407,8 @@ export default function BookingSettingsScreen() {
           reminder_message: settings.reminder_message || null,
           booking_location: settings.booking_location || null,
           show_booking_location: settings.show_booking_location,
+          cancellation_deadline_hours: settings.cancellation_deadline_hours,
+          edit_deadline_hours: settings.edit_deadline_hours,
           updated_at: new Date().toISOString(),
         } as any,
         { onConflict: 'user_id' }
@@ -856,6 +873,8 @@ export default function BookingSettingsScreen() {
             )}
           </View>
 
+          {/* ── All settings sections (hidden when bookings disabled) ── */}
+          {settings.enabled && (<>
           {/* ── Section: Basic Settings ───────────────────────────── */}
           {renderSectionHeader('basic', 'settings-outline', t('bookingSettings.basicSettings'))}
           {expandedSections.basic && (
@@ -940,6 +959,18 @@ export default function BookingSettingsScreen() {
                 (v) => updateSetting('allow_client_edits', v)
               )}
 
+              {/* Edit deadline (only when client edits are allowed) */}
+              {settings.allow_client_edits && renderPickerRow(
+                t('bookingSettings.editDeadline'),
+                (() => { const o = DEADLINE_OPTIONS.find((o) => o.key === settings.edit_deadline_hours); return o ? `${o.i18nLabel} ${t(o.i18nUnit)}` : `${settings.edit_deadline_hours} ${t('bookingSettings.hours')}`; })(),
+                () =>
+                  openPicker(
+                    t('bookingSettings.editDeadline'),
+                    DEADLINE_OPTIONS.map((o) => ({ key: o.key, label: `${o.i18nLabel} ${t(o.i18nUnit)}` })),
+                    (val) => updateSetting('edit_deadline_hours', val)
+                  )
+              )}
+
               {/* Show booking location toggle */}
               <View style={[styles.switchRow, !settings.show_booking_location && { borderBottomWidth: 0 }]}>
                 <View style={{ flex: 1, marginRight: Spacing.sm }}>
@@ -976,6 +1007,26 @@ export default function BookingSettingsScreen() {
                     {t('bookingSettings.bookingLocationFallback')}
                   </Text>
                 </View>
+              )}
+            </View>
+          )}
+
+          {/* ── Section: Client Cancellation ──────────────────── */}
+          {renderSectionHeader('cancellation', 'close-circle-outline', t('bookingSettings.clientCancellation'))}
+          {expandedSections.cancellation && (
+            <View style={[styles.sectionContent, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={{ fontSize: FontSizes.xs, color: colors.textSecondary, paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm, paddingBottom: Spacing.xs }}>
+                {t('bookingSettings.clientCancellationDesc')}
+              </Text>
+              {renderPickerRow(
+                t('bookingSettings.cancellationDeadline'),
+                (() => { const o = DEADLINE_OPTIONS.find((o) => o.key === settings.cancellation_deadline_hours); return o ? `${o.i18nLabel} ${t(o.i18nUnit)}` : `${settings.cancellation_deadline_hours} ${t('bookingSettings.hours')}`; })(),
+                () =>
+                  openPicker(
+                    t('bookingSettings.cancellationDeadline'),
+                    DEADLINE_OPTIONS.map((o) => ({ key: o.key, label: `${o.i18nLabel} ${t(o.i18nUnit)}` })),
+                    (val) => updateSetting('cancellation_deadline_hours', val)
+                  )
               )}
             </View>
           )}
@@ -1230,6 +1281,8 @@ export default function BookingSettingsScreen() {
               </TouchableOpacity>
             </View>
           )}
+
+          </>)}
 
           {/* ── Save Button ───────────────────────────────────────── */}
           <TouchableOpacity

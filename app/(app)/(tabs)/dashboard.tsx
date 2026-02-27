@@ -17,7 +17,7 @@ import { useTranslations } from '@/hooks/useTranslations';
 import { useOfflineData } from '@/hooks/useOfflineData';
 import { useTutorial } from '@/hooks/useTutorial';
 import { Spacing, FontSizes, BorderRadius } from '@/constants/theme';
-import { NotificationBell, CriticalAlertsCard, StatsSkeleton, ListSkeleton, StatusBadge, showToast } from '@/components';
+import { NotificationBell, CriticalAlertsCard, StatsSkeleton, ListSkeleton, StatusBadge, showToast, FoundingPromoBanner } from '@/components';
 import type { RequestWithClient, TaskWithProject, ProjectWithRelations } from '@/lib/database.types';
 
 interface DashboardStats {
@@ -41,6 +41,7 @@ interface RevenueData {
 interface UpcomingBooking {
   id: string;
   title: string;
+  booking_date: string | null;
   start_time: string;
   end_time: string;
   status: string;
@@ -143,7 +144,8 @@ export default function DashboardScreen() {
           .from('bookings')
           .select('*, client:clients(name)')
           .eq('status', 'confirmed')
-          .gte('start_time', new Date().toISOString())
+          .gte('booking_date', new Date().toISOString().split('T')[0])
+          .order('booking_date', { ascending: true })
           .order('start_time', { ascending: true })
           .limit(5),
         supabase
@@ -225,8 +227,23 @@ export default function DashboardScreen() {
     }).format(amount);
   }, [dateLocale]);
 
-  const formatBookingTime = useCallback((dateString: string) => {
-    const date = new Date(dateString);
+  const formatBookingTime = useCallback((timeStr: string, bookingDate?: string | null) => {
+    // Handle TIME-only ("09:00:00") from PostgreSQL TIME columns
+    if (!timeStr.includes('T') && !timeStr.includes('-')) {
+      const [h, m] = timeStr.split(':');
+      const hour = parseInt(h, 10);
+      if (isNaN(hour)) return timeStr;
+      const timePart = `${hour % 12 || 12}:${m} ${hour >= 12 ? 'PM' : 'AM'}`;
+      if (bookingDate) {
+        const d = new Date(bookingDate + 'T00:00:00');
+        if (!isNaN(d.getTime())) {
+          const datePart = d.toLocaleDateString(dateLocale, { weekday: 'short', month: 'short', day: 'numeric' });
+          return `${datePart}, ${timePart}`;
+        }
+      }
+      return timePart;
+    }
+    const date = new Date(timeStr);
     return date.toLocaleDateString(dateLocale, {
       weekday: 'short',
       month: 'short',
@@ -237,7 +254,8 @@ export default function DashboardScreen() {
   }, [dateLocale]);
 
   const getRelativeDay = useCallback((dateString: string) => {
-    const date = new Date(dateString);
+    const safe = dateString.includes('T') ? dateString : dateString + 'T00:00:00';
+    const date = new Date(safe);
     const now = new Date();
     now.setHours(0, 0, 0, 0);
     const target = new Date(date);
@@ -250,7 +268,8 @@ export default function DashboardScreen() {
   }, [t, dateLocale]);
 
   const formatShortDate = useCallback((dateString: string) => {
-    return new Date(dateString).toLocaleDateString(dateLocale, {
+    const safe = dateString.includes('T') ? dateString : dateString + 'T00:00:00';
+    return new Date(safe).toLocaleDateString(dateLocale, {
       month: 'short',
       day: 'numeric',
     });
@@ -287,9 +306,9 @@ export default function DashboardScreen() {
 
     const todayItems: UpcomingBooking[] = [];
     const laterItems: UpcomingBooking[] = [];
+    const todayStr = todayStart.toISOString().split('T')[0];
     for (const b of upcomingBookings) {
-      const start = new Date(b.start_time);
-      if (start >= todayStart && start < todayEnd) {
+      if (b.booking_date === todayStr) {
         todayItems.push(b);
       } else {
         laterItems.push(b);
@@ -316,7 +335,7 @@ export default function DashboardScreen() {
         id: b.id,
         title: b.title,
         subtitle: (b.client as any)?.name || t('dashboard.noClient'),
-        date: b.start_time,
+        date: b.booking_date || '',
       });
     }
 
@@ -344,7 +363,11 @@ export default function DashboardScreen() {
 
     return items
       .filter(item => item.date)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+      .sort((a, b) => {
+        const aDate = a.date.includes('T') ? a.date : a.date + 'T00:00:00';
+        const bDate = b.date.includes('T') ? b.date : b.date + 'T00:00:00';
+        return new Date(aDate).getTime() - new Date(bDate).getTime();
+      })
       .slice(0, 8);
   }, [laterBookings, upcomingDeadlines, upcomingTasks, t]);
 
@@ -394,6 +417,11 @@ export default function DashboardScreen() {
 
         {/* Critical Alerts */}
         <CriticalAlertsCard />
+
+        {/* First 50 Founding Member Promo */}
+        <View style={{ paddingHorizontal: Spacing.lg, marginBottom: Spacing.md }}>
+          <FoundingPromoBanner compact />
+        </View>
 
         {/* Stats Grid - 2 rows of 3 */}
         <View style={styles.statsGrid}>
@@ -495,7 +523,7 @@ export default function DashboardScreen() {
                       {booking.title}
                     </Text>
                     <Text style={[styles.listItemSubtitle, { color: colors.textSecondary }]}>
-                      {(booking.client as any)?.name || t('dashboard.noClient')} - {formatBookingTime(booking.start_time)}
+                      {(booking.client as any)?.name || t('dashboard.noClient')} - {formatBookingTime(booking.start_time, booking.booking_date)}
                     </Text>
                   </View>
                   <View style={[styles.statusBadge, { backgroundColor: colors.successLight }]}>

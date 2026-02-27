@@ -15,6 +15,7 @@ export function useTutorial(screenId: string) {
   const tutorialsEnabled = useTutorialStore((s) => s.tutorialsEnabled);
   const completedTutorials = useTutorialStore((s) => s.completedTutorials);
   const lastKnownTier = useTutorialStore((s) => s.lastKnownTier);
+  const hasHydrated = useTutorialStore((s) => s._hasHydrated);
   const markComplete = useTutorialStore((s) => s.markComplete);
   const markTierTutorialComplete = useTutorialStore((s) => s.markTierTutorialComplete);
   const hasTierTutorialCompleted = useTutorialStore((s) => s.hasTierTutorialCompleted);
@@ -24,7 +25,7 @@ export function useTutorial(screenId: string) {
   const hasTriggered = useRef(false);
 
   useEffect(() => {
-    if (!tutorialsEnabled || hasTriggered.current) return;
+    if (!hasHydrated || !tutorialsEnabled || hasTriggered.current) return;
 
     const currentTier = (tier || 'free') as TierSlug;
 
@@ -61,7 +62,7 @@ export function useTutorial(screenId: string) {
     }, AUTO_TRIGGER_DELAY);
 
     return () => clearTimeout(timer);
-  }, [screenId, tier, tutorialsEnabled]);
+  }, [screenId, tier, tutorialsEnabled, hasHydrated]);
 
   const showScreenTutorial = useCallback(() => {
     const tutorials = getTutorialsForScreen(screenId);

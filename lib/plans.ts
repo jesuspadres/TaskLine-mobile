@@ -113,7 +113,7 @@ export const PLANS: PlanData[] = [
       payments: true,
       scheduler: true,
       productCatalog: 'featureValues.unlimited',
-      branding: 'comingSoon',
+      branding: true,
       whiteLabel: false,
       team: '\u2014',
       clientPortal: true,

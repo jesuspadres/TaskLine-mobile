@@ -33,6 +33,8 @@ export default function AppLayout() {
       <Stack.Screen name="notification-settings" />
       <Stack.Screen name="qr-settings" />
       <Stack.Screen name="booking-settings" />
+      <Stack.Screen name="branding-settings" />
+      <Stack.Screen name="request-form-settings" />
       <Stack.Screen name="privacy-policy" />
       <Stack.Screen name="terms-of-service" />
       <Stack.Screen name="stripe-payments" />

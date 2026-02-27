@@ -9,17 +9,14 @@ LogBox.ignoreLogs(['Invalid Refresh Token']);
 import { useAuthStore } from '@/stores/authStore';
 import { useThemeStore } from '@/stores/themeStore';
 import { useSubscriptionStore } from '@/stores/subscriptionStore';
-import { useBiometricStore } from '@/stores/biometricStore';
 import { useTheme } from '@/hooks/useTheme';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
-import { useBiometricAuth } from '@/hooks/useBiometricAuth';
 import { ToastProvider } from '@/components/Toast';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { OfflineBanner } from '@/components/OfflineBanner';
 import { LoadingOverlayProvider } from '@/components/LoadingOverlay';
 import { TutorialProvider } from '@/components/TutorialOverlay';
-import { BiometricLockScreen } from '@/components/BiometricLockScreen';
 import { ENV } from '@/lib/env';
 
 Sentry.init({
@@ -44,7 +41,6 @@ Sentry.init({
 function RootLayout() {
   const { user, loading, initialized, initialize } = useAuthStore();
   const initializeTheme = useThemeStore((s) => s.initialize);
-  const initializeBiometric = useBiometricStore((s) => s.initialize);
   const initializeSubscription = useSubscriptionStore((s) => s.initialize);
   const clearSubscription = useSubscriptionStore((s) => s.clear);
   const { colors, isDark } = useTheme();
@@ -57,13 +53,9 @@ function RootLayout() {
   // Initialize push notifications (registers token when user is logged in)
   usePushNotifications();
 
-  // Biometric lock state (hook handles AppState monitoring)
-  const { isLocked } = useBiometricAuth();
-
   useEffect(() => {
     initialize();
     initializeTheme();
-    initializeBiometric();
   }, []);
 
   // Initialize subscription when user logs in, clear on logout
@@ -110,7 +102,6 @@ function RootLayout() {
                 <Stack.Screen name="(auth)" options={{ headerShown: false }} />
                 <Stack.Screen name="(app)" options={{ headerShown: false }} />
               </Stack>
-              {isLocked && user && <BiometricLockScreen />}
             </View>
           </TutorialProvider>
         </LoadingOverlayProvider>
