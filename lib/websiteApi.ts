@@ -4,6 +4,7 @@
  * The website uses cookie-based Supabase SSR auth. We construct the auth cookie
  * from the mobile app's Supabase session and send it via the Cookie header.
  */
+import { File as ExpoFile } from 'expo-file-system';
 import { supabase } from './supabase';
 import { ENV } from './env';
 
@@ -397,21 +398,16 @@ export async function updateBrandingSettings(settings: Omit<BrandingSettings, 'l
 }
 
 export async function uploadBrandingLogo(uri: string, mimeType: string): Promise<{ logoUrl: string }> {
-  const cookie = await buildAuthCookie();
   const ext = mimeType.split('/')[1] === 'svg+xml' ? 'svg' : mimeType.split('/')[1] || 'png';
   const fileName = `logo.${ext}`;
 
-  const formData = new FormData();
-  formData.append('file', {
-    uri,
-    name: fileName,
-    type: mimeType,
-  } as any);
+  // Read file as base64 using new expo-file-system v19 File API
+  const file = new ExpoFile(uri);
+  const base64 = await file.base64();
 
-  const res = await fetch(`${ENV.APP_URL}/api/branding/logo`, {
+  const res = await websiteApiFetch('/api/branding/logo', {
     method: 'POST',
-    headers: { 'Cookie': cookie },
-    body: formData,
+    body: JSON.stringify({ file: base64, mimeType, fileName }),
   });
 
   if (!res.ok) {

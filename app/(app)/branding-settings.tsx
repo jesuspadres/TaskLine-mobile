@@ -160,7 +160,9 @@ export default function BrandingSettingsScreen() {
     setUploading(true);
     try {
       const data = await uploadBrandingLogo(asset.uri, mimeType);
-      setLogoUrl(data.logoUrl);
+      // Append cache-busting param — URL path doesn't change between uploads
+      const bustCache = `${data.logoUrl}?v=${Date.now()}`;
+      setLogoUrl(bustCache);
       showToast('success', t('brandingSettings.logoUploaded'));
     } catch (err: any) {
       secureLog.error('Failed to upload logo:', err);
