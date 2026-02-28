@@ -73,12 +73,18 @@ export default function StripePaymentsScreen() {
     // Try to start Connect onboarding via the website API
     setActionLoading(true);
     try {
-      const res = await websiteApiFetch('/api/stripe/connect/onboarding', {
+      const res = await websiteApiFetch('/api/stripe/connect/onboard', {
         method: 'POST',
       });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Onboarding failed (${res.status})`);
+      }
       const data = await res.json();
       if (data.url) {
         await WebBrowser.openBrowserAsync(data.url);
+        // Refresh status after returning from onboarding
+        fetchStripeStatus();
         return;
       }
     } catch (error: any) {
